@@ -5,9 +5,13 @@ ecosistema completo para diseñar, validar, ejecutar, monitorizar y monetizar
 estrategias cuantitativas sobre múltiples brokers y exchanges, con estándares
 de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
-> Estado del proyecto: **Fase 0 — Diseño de Arquitectura**.
-> En este momento el repositorio contiene únicamente el diseño arquitectónico.
+> Estado del proyecto: **Fase de Diseño (Docs-first)**.
+> En este momento el repositorio contiene únicamente documentación de diseño.
 > No hay código de producto todavía (por decisión explícita).
+>
+> 📋 **Empieza aquí:** [Plan Maestro de Documentación](docs/00-governance/documentation-master-plan.md)
+> — la lista completa de TODOS los documentos a crear antes de programar,
+> organizada por fases (D0 → D7) y con el orden exacto de construcción.
 
 ---
 
