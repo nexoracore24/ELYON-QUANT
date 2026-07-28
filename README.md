@@ -1,1 +1,71 @@
-# ELYON-QUANT
+# ELYON QUANT
+
+**Plataforma profesional de trading algorítmico.** No es un bot de MT5: es un
+ecosistema completo para diseñar, validar, ejecutar, monitorizar y monetizar
+estrategias cuantitativas sobre múltiples brokers y exchanges, con estándares
+de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
+
+> Estado del proyecto: **Fase 0 — Diseño de Arquitectura**.
+> En este momento el repositorio contiene únicamente el diseño arquitectónico.
+> No hay código de producto todavía (por decisión explícita).
+
+---
+
+## Qué es ELYON QUANT
+
+Un ecosistema SaaS multi-tenant que cubre el ciclo de vida completo del trading
+cuantitativo:
+
+1. **Strategy Lab** — autoría, versionado y validación de estrategias.
+2. **Market Data Platform** — ingesta y normalización de datos de mercado
+   (tick, OHLCV, order book) en tiempo real e histórico.
+3. **Backtesting Engine** — simulación histórica reproducible y de alta fidelidad.
+4. **Paper Trading** — simulación en vivo sin capital real.
+5. **Execution & OMS** — gestión del ciclo de vida de órdenes y ruteo.
+6. **Risk Management** — control de riesgo pre-trade / post-trade y *kill-switch*.
+7. **Portfolio & Analytics** — posiciones, PnL, métricas y *tearsheets*.
+8. **Marketplace** — publicación, suscripción y monetización de estrategias.
+9. **Connectivity** — adaptadores a MT5, Interactive Brokers, Binance, etc.
+
+---
+
+## Principios de ingeniería
+
+- **Clean Architecture** — dependencias apuntando hacia el dominio.
+- **Domain-Driven Design (DDD)** — diseño estratégico + táctico.
+- **SOLID + Clean Code** — código legible, testeable y mantenible.
+- **Event-Driven** donde aporta valor (integración entre *bounded contexts*).
+- **Modular Monolith** listo para evolucionar a **microservicios**.
+- **Secure by design** y **Scalable by design**.
+
+---
+
+## Índice de documentación de arquitectura
+
+| # | Documento | Contenido |
+|---|-----------|-----------|
+| 00 | [Visión y Arquitectura General](docs/architecture/00-vision-y-arquitectura-general.md) | Visión, C4, estilo arquitectónico |
+| 01 | [Organización del Repositorio](docs/architecture/01-organizacion-repositorio.md) | Monorepo, carpetas, estructura por capas |
+| 02 | [Módulos y Bounded Contexts](docs/architecture/02-modulos-y-bounded-contexts.md) | Subdominios, agregados, context map |
+| 03 | [Dependencias entre Módulos](docs/architecture/03-dependencias-entre-modulos.md) | Reglas, grafo de dependencias, contratos |
+| 04 | [Stack Tecnológico](docs/architecture/04-stack-tecnologico.md) | Tecnologías recomendadas y por qué |
+| 05 | [Roadmap Técnico](docs/architecture/05-roadmap-tecnico.md) | Fases, hitos, evolución a microservicios |
+| 06 | [Convenciones de Desarrollo](docs/architecture/06-convenciones-desarrollo.md) | Estilo, errores, logging, DI |
+| 07 | [Naming Convention](docs/architecture/07-naming-convention.md) | Nomenclatura por lenguaje y capa |
+| 08 | [Git Strategy](docs/architecture/08-git-strategy.md) | Trunk-based, PRs, versionado, releases |
+| 09 | [Testing Strategy](docs/architecture/09-testing-strategy.md) | Pirámide de tests, contract testing |
+| 10 | [Deployment Strategy](docs/architecture/10-deployment-strategy.md) | CI/CD, GitOps, entornos, progresivo |
+| 11 | [Seguridad](docs/architecture/11-seguridad.md) | AuthN/Z, secretos, cumplimiento |
+| 12 | [Escalabilidad](docs/architecture/12-escalabilidad.md) | Escalado horizontal, datos, resiliencia |
+| 13 | [Plan de Ejecución paso a paso](docs/architecture/13-plan-de-ejecucion.md) | Cómo construirlo incrementalmente |
+
+**Decisiones de arquitectura (ADR):** ver [`docs/adr/`](docs/adr/).
+
+---
+
+## Lectura recomendada
+
+1. Empieza por **[00 — Visión](docs/architecture/00-vision-y-arquitectura-general.md)**.
+2. Sigue con **[02 — Bounded Contexts](docs/architecture/02-modulos-y-bounded-contexts.md)**.
+3. Cuando quieras empezar a construir, ve directo a
+   **[13 — Plan de Ejecución](docs/architecture/13-plan-de-ejecucion.md)**.
