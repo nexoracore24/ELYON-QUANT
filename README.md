@@ -30,6 +30,12 @@ cuantitativo:
 7. **Portfolio & Analytics** — posiciones, PnL, métricas y *tearsheets*.
 8. **Marketplace** — publicación, suscripción y monetización de estrategias.
 9. **Connectivity** — adaptadores a MT5, Interactive Brokers, Binance, etc.
+10. **Decision Replay Engine** — registro de **todas** las decisiones (ejecutadas y
+    descartadas) y reproducción paso a paso de cualquier señal.
+
+El motor SMC incluye **Fibonacci Institucional** (anclado a estructura, nunca
+indicador independiente; provee la OTE) y es **explicable por diseño**: nunca
+responde *"entró porque sí"*.
 
 ---
 
@@ -41,6 +47,9 @@ cuantitativo:
 - **Event-Driven** donde aporta valor (integración entre *bounded contexts*).
 - **Modular Monolith** listo para evolucionar a **microservicios**.
 - **Secure by design** y **Scalable by design**.
+- **Explainable by design** — toda decisión de trading es trazable y explicable
+  (qué detectó, confirmó, descartó; pesos; score; reglas y vetos).
+- **Fully replayable** — cada decisión, ejecutada o descartada, es reproducible.
 
 ---
 

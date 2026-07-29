@@ -513,6 +513,17 @@ impulsivo donde el motor busca la entrada de mejor riesgo/beneficio.
 tras un **sweep**. La intersección `OTE ∩ POI ∩ (discount|premium)` es el
 "golden pocket" del motor y uno de los mayores aportes al score.
 
+**Fibonacci institucional (fuente de la OTE).** La OTE es la subzona `0.618–0.786`
+de un **Fibonacci anclado a estructura**, no de un Fibonacci trazado a mano. Su
+especificación completa —swing origen/destino, detección automática del leg,
+cuándo (y cuándo **no**) recalcular, niveles `0/0.5/0.618/0.705/0.786/1/1.272/1.618/
+2.0/2.618` y combinación con OB, FVG, sweeps y BOS/CHoCH— está en el **Smart Money
+Engine Bible, detector D32 (Fibonacci Institucional)**. **Regla dura (⛔):**
+`fib_standalone_entry = false` — **Fibonacci nunca genera una entrada por sí solo**;
+es siempre una **confirmación adicional dentro del Scoring Engine** (§26). Los
+niveles de proyección `1.272/1.618/2.0/2.618` alimentan los objetivos de TP (§30),
+subordinados a la liquidez.
+
 ---
 
 # 20. Impulsos y retrocesos (Displacement vs. Retracement)
@@ -661,7 +672,7 @@ se cumplen todos los **vetos duros** (§35/§37).
 | 4 | **Calidad del POI** | OB/Breaker/Mitigation válido y sin mitigar (§13–§15) | 12 |
 | 5 | **Imbalance (FVG/IFVG)** | FVG/IFVG con desplazamiento en confluencia con el POI (§16–§17) | 10 |
 | 6 | **Premium/Discount** | POI en discount (long) / premium (short) (§18) | 8 |
-| 7 | **OTE** | Entrada dentro de la ventana OTE 0.618–0.786 (§19) | 6 |
+| 7 | **OTE / Fibonacci** | Entrada en la ventana OTE 0.618–0.786 del Fibonacci institucional (§19, D32). Fibonacci solo **confirma**, nunca gatilla | 6 |
 | 8 | **Killzone / sesión** | Setup dentro de killzone institucional (§24) | 8 |
 | 9 | **Régimen ATR + Spread OK** | ATR en rango operable y spread aceptable (§22–§23) | 6 |
 | 10 | **Volumen confirmando** | Spike de volumen en el desplazamiento (§21) | 4 |
@@ -971,6 +982,15 @@ compartido con el Execution Engine (ENG-006) y la seguridad (SEC-000).
 Es la base de la explicabilidad (§40), del backtesting reproducible y de la
 auditoría (audit ledger, SEC-000).
 
+> **Persistencia y reproducción → Decision Replay Engine (ENG-009).** El
+> `DecisionRecord` descrito aquí es el **artefacto**; el módulo core
+> **Decision Replay Engine** lo persiste (append-only), lo extiende con el
+> *snapshot* de mercado necesario para reconstruir la decisión, y permite
+> **reproducir paso a paso** cualquier operación **o señal descartada** como una
+> repetición. Todas las decisiones —incluidas las **no ejecutadas**— se registran
+> con el mismo detalle. Especificación completa en
+> `04-engines/decision-replay-engine-spec.md`.
+
 **Contenido del `DecisionRecord` (esquema conceptual):**
 - **Identidad y contexto:** `decision_id`, `timestamp` (UTC), `symbol`,
   `instrument_profile`, `strategy_version`, `config_hash` (hash de la config y
@@ -1002,6 +1022,17 @@ Requisito **no negociable**: después de cada decisión —entrar o no entrar—
 motor debe poder **explicar exactamente por qué**, en lenguaje claro y en datos
 estructurados. Es lo que convierte a ELYON QUANT de "caja negra" en **herramienta
 institucional auditable**.
+
+> **Estándar de núcleo → Explainable AI (ENG-010).** La explicabilidad es un
+> **invariante transversal** de ELYON QUANT, no una función de este motor. El
+> sistema **nunca** responde *"entró porque sí"*: toda decisión explica **qué
+> detectó, qué confirmó, qué descartó, el peso de cada criterio, el score, las
+> reglas activadas y las reglas que bloquearon la entrada**. El motor es
+> explicable **por diseño** (el scoring es una suma ponderada transparente; cada
+> detector es una regla determinista), por lo que la contribución de cada factor
+> es **exacta**, no una aproximación post-hoc. Todo componente de ML entra como un
+> **factor explicable más**, nunca como *override* opaco. Especificación completa
+> en `04-engines/explainable-ai-spec.md`.
 
 ### 40.1 Dos formatos, misma verdad
 1. **Estructurado** (para máquina/UI/auditoría): el `DecisionRecord` (§39) con el

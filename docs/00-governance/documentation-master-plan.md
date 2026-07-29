@@ -178,13 +178,15 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 |----|-----------|-----------|-------|-----------|--------|
 | ENG-000 | **Market Data Engine Spec** | Ingesta, normalización, catálogo, calidad, históricos | Quant | ARC-006 | ⬜ |
 | ENG-001 | **Trading / Strategy Engine Spec** | Modelo de estrategia, señales, indicadores, ciclo de vida | Quant | ENG-000 | 🟨 → `04-engines/trading-engine-bible.md` |
-| ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura | Quant | ENG-000, ENG-001 | 🟨 → `04-engines/smart-money-engine-bible.md` (30 detectores) |
+| ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 → `04-engines/smart-money-engine-bible.md` (31 detectores) |
 | ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
 | ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ |
 | ENG-005 | **Risk Engine Spec** | Pre/post-trade, límites, exposición, VaR, kill-switch | Quant+CTO | ENG-001 | ⬜ |
 | ENG-006 | **Execution Engine Spec** | OMS, ciclo de orden, SOR, idempotencia, conciliación | CTO+Quant | ENG-005 | ⬜ |
 | ENG-007 | **Portfolio & Analytics Engine Spec** | Position keeping, PnL, métricas, tearsheets, atribución | Quant | ENG-006 | ⬜ |
 | ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ |
+| ENG-009 | **Decision Replay Engine Spec** | Registro de **todas** las decisiones (ejecutadas + descartadas) y reproducción paso a paso | CTO | ENG-001, ENG-002 | 🟨 → `04-engines/decision-replay-engine-spec.md` |
+| ENG-010 | **Explainable AI (XAI) Standard** | Invariante de núcleo: toda decisión explicable (qué detectó/confirmó/descartó, pesos, score, reglas, vetos) | ML | ENG-001, ENG-009 | 🟨 → `04-engines/explainable-ai-spec.md` |
 
 ---
 

@@ -1592,7 +1592,8 @@ T3 POI en 0.70 pero premium (long) → rechazado por pd. T4 retroceso 0.9 → fu
 **Falsos positivos.** OTE sin POI marcada como señal → `ote_requires_poi`. **Falsos
 negativos.** Sweet spot ligeramente fuera por `ote_tol` estrecho → calibrar.
 
-**Relaciones.** Consume D25/D26–D28; confluye con POIs (D21–D24) y BPR/FVG; factor 7
+**Relaciones.** Consume D25/D26–D28 y el **Fibonacci Institucional (D32)** —del que
+la OTE es la subzona `0.618–0.786`—; confluye con POIs (D21–D24) y BPR/FVG; factor 7
 del scoring; define el precio de entrada de precisión.
 
 ---
@@ -1709,6 +1710,203 @@ condiciona Volume Confirmation (D30) y los vetos (ENG-001 §24/§35).
 
 ---
 
+# Capa 6 (adenda) — Fibonacci Institucional
+
+## D32 · Institutional Fibonacci
+
+> **Fibonacci NO es un indicador independiente en ELYON QUANT.** Es una
+> herramienta de **valoración anclada a la estructura** que vive **dentro** del
+> Smart Money Engine: sus niveles solo tienen sentido sobre un *leg* impulsivo
+> definido por estructura (D25) y sus salidas alimentan OTE (D29),
+> premium/discount (D26–D28) y objetivos de TP. **Nunca genera una entrada por sí
+> solo**: es una **confirmación adicional dentro del Scoring Engine** (ENG-001
+> §26). Si el Fibonacci "sugiere" algo pero no hay estructura + liquidez + POI, no
+> hay operación.
+
+**Definición matemática.** Dado un *leg* impulsivo del dealing range (D25) con
+**swing origen** `O` (donde inicia el impulso) y **swing destino** `T` (donde
+termina), `span = T − O` (con signo; leg alcista → `T`=high, `O`=low, `span>0`).
+El motor almacena los niveles como **precios absolutos** anclados a `(O, T)` para
+evitar ambigüedad de convención de plataforma:
+- **Retrocesos** `r ∈ [0,1]`: `P_ret(r) = T − r·span` (`r=0` en destino,
+  `r=1` en origen).
+- **Proyecciones** `e > 1`: `P_proj(e) = O + e·span` (`e=1` en destino; `e>1`
+  proyecta **más allá** del destino en la dirección del impulso).
+
+> Nota de convención (determinista): los **retrocesos** se miden desde el
+> **destino** (`0` = destino, extremo del impulso; `1` = origen, retroceso total),
+> y las **proyecciones** desde el **origen** (objetivos más allá del destino).
+> Es la práctica institucional estándar y elimina el "repintado" por convención.
+
+### Niveles canónicos (los 10 obligatorios)
+
+| Nivel | Rol | Precio canónico | Significado operativo |
+|-------|-----|-----------------|-----------------------|
+| **0** | ancla | `T` (destino) | Extremo del impulso (0 % retroceso) |
+| **0.5** | retroceso | `T − 0.5·span` | **Equilibrium**: frontera premium/discount (D28) |
+| **0.618** | retroceso | `T − 0.618·span` | Inicio de la zona **OTE** |
+| **0.705** | retroceso | `T − 0.705·span` | **OTE principal** (sweet spot de entrada) |
+| **0.786** | retroceso | `T − 0.786·span` | Fin de la zona OTE (retroceso profundo) |
+| **1** | ancla | `O` (origen) | Retroceso total; **su ruptura invalida el leg** |
+| **1.272** | proyección | `O + 1.272·span` | Primer objetivo (TP1) más allá del destino |
+| **1.618** | proyección | `O + 1.618·span` | Objetivo extendido (TP2) |
+| **2.0** | proyección | `O + 2.0·span` | Objetivo amplio (TP3 / runner) |
+| **2.618** | proyección | `O + 2.618·span` | Objetivo de expansión máxima |
+
+- **Zona OTE** = `[0.618, 0.786]`, óptimo `0.705` → coincide con D29 (mismos
+  parámetros `ote_low/ote_optimal/ote_high`). Fibonacci **provee** los niveles;
+  OTE **es** la subzona `0.618–0.786` de este Fibonacci.
+- **Premium/Discount**: el nivel `0.5` es el equilibrio; por encima (hacia `0`)
+  = premium; por debajo (hacia `1`) = discount (para un leg alcista). Consistente
+  con D26–D28.
+
+**Objetivo.** Cuantificar de forma objetiva (a) la **zona de entrada de precisión**
+(OTE) dentro de un retroceso institucional y (b) los **objetivos de TP** por
+proyección, **siempre** anclado a estructura real. Es un **multiplicador de
+confluencia**, no una señal.
+
+**Parámetros configurables.**
+- `fib_leg_source` ∈ {`dealing_range_leg`(def.), `last_displacement_leg`,
+  `structural_swing`} — de dónde sale el leg.
+- `fib_anchor_origin` ∈ {`impulse_start`(def.), `sweep_extreme`} — el origen se
+  ancla en el inicio del displacement o, preferido, en el **extremo del sweep**
+  que originó el impulso.
+- `fib_retracement_levels` (def. `[0, 0.5, 0.618, 0.705, 0.786, 1]`).
+- `fib_projection_levels` (def. `[1.272, 1.618, 2.0, 2.618]`).
+- `ote_low/ote_optimal/ote_high` (0.618/0.705/0.786) — compartidos con D29.
+- `fib_recalc_on` (def. `[bos, choch, mss, new_leg_extreme]`).
+- `fib_freeze_on_entry` (def. **true**) — al abrir una operación, el Fibonacci del
+  setup se **congela** para todo su ciclo de vida (los niveles que definieron la
+  entrada, SL y TP no se mueven → no repaint, trazabilidad con DecisionRecord).
+- `fib_min_leg_atr` (def. 1.0) — ignora legs triviales.
+
+### Detección automática del swing correcto (origen y destino)
+
+Regla determinista para elegir el leg (evita el subjetivismo del "¿qué swing
+tomo?"):
+1. Tomar el **leg impulsivo vigente** del Dealing Range (D25), es decir el último
+   tramo confirmado por **BOS/CHoCH/MSS** (D08–D10) con **displacement** (D01).
+2. `destino T` = el **extremo alcanzado** por ese impulso (el high del BOS alcista
+   / low del BOS bajista).
+3. `origen O` = el **extremo desde el que arrancó** el displacement. Con
+   `fib_anchor_origin = sweep_extreme` (preferido), `O` = el extremo de la **vela
+   de barrido** (D16) que precedió al impulso (el low del sweep de SSL para un leg
+   alcista). Esto ancla el Fibonacci a la manipulación real, no a un swing
+   arbitrario.
+4. Validar `|span| ≥ fib_min_leg_atr · ATR`; si no, no se traza (leg trivial).
+5. Alinear con el **bias HTF** (D05/MTF): solo se opera la OTE del leg cuya
+   dirección coincide con el bias (ENG-001 §5).
+
+### Cuándo recalcular Fibonacci
+- Al confirmarse un **nuevo evento estructural** (BOS/CHoCH/MSS) que **redefine el
+  dealing range** (D25) → nuevo leg → nuevo Fibonacci.
+- Cuando el precio hace un **nuevo extremo** que **extiende el destino** del leg
+  vigente en la dirección del impulso (se actualiza `T`, se recalculan niveles).
+- Al cambiar de timeframe de análisis (cada TF mantiene su propio Fibonacci).
+
+### Cuándo **NO** recalcular (anti-repaint / determinismo)
+- Durante el **retroceso o la consolidación** dentro del leg vigente: el
+  Fibonacci está **anclado y estable** (es precisamente cuando se usa para
+  entrar).
+- Ante **swings internos** (D06) que **no** rompen estructura mayor: el micro-ruido
+  no re-ancla el Fibonacci.
+- **Nunca** durante el ciclo de vida de una operación abierta si
+  `fib_freeze_on_entry = true`: los niveles que definieron entrada/SL/TP quedan
+  congelados (evita mover objetivos "a conveniencia" y garantiza que el
+  DecisionRecord sea reproducible).
+
+### Cómo usar OTE
+El motor busca que el **POI** (OB/FVG/Breaker) al que retrocede el precio caiga
+dentro de `[0.618, 0.786]` del Fibonacci, con preferencia por el **0.705**. La
+confluencia `OTE ∩ POI ∩ (discount|premium)` es el "golden pocket": máxima
+puntuación del factor OTE/Fibonacci del scoring. La **entrada** se dispara por el
+modelo LTF (sweep → CHoCH → FVG), **no** por tocar el 0.705 (Fibonacci confirma,
+no gatilla).
+
+### Combinación con otros detectores (confluencia, no señal)
+- **+ Order Blocks (D21):** un OB cuya zona intersecta la OTE (`0.618–0.786`)
+  puntúa más; el OB define la zona, el Fibonacci confirma que está "a buen precio".
+  Refinamiento: entrada en `max(OB.mean, fib_0705)`.
+- **+ FVG (D18):** un FVG dentro de la OTE es confluencia de imbalance + valor; el
+  `CE` del FVG cercano al 0.705 es entrada de precisión.
+- **+ Liquidity Sweeps (D16):** el **origen** del Fibonacci se ancla al extremo del
+  sweep; así el 0.0 nace de la toma de liquidez y la OTE mide el retroceso del
+  impulso post-manipulación. Sweep + OTE + POI = setup A+.
+- **+ BOS/CHoCH (D08/D09):** el leg del Fibonacci **es** el displacement que produjo
+  el BOS/CHoCH. Un CHoCH define un nuevo leg de reversión → se traza Fibonacci
+  sobre él y se busca la OTE para la entrada a favor del nuevo carácter. Un BOS de
+  continuación redefine el destino y proyecta nuevos objetivos (1.272–2.618).
+- **+ Proyecciones para TP:** los niveles `1.272/1.618/2.0/2.618` son objetivos de
+  cierre parcial (ENG-001 §30/§33), subordinados a la **liquidez** como objetivo
+  primario (si hay un pool de liquidez antes del 1.618, manda la liquidez).
+
+**Casos válidos.** Leg alcista anclado en el low de un sweep de SSL; el precio
+retrocede a un bullish OB situado en el 0.70 (dentro de OTE, en discount) →
+Fibonacci confirma (suma al score). Proyección 1.618 coincide con BSL objetivo → TP.
+**Casos inválidos.** Trazar Fibonacci sobre un tramo **no impulsivo** (sin
+displacement) → rechazado. Origen elegido en un swing arbitrario no ligado a
+estructura → prohibido (usar `fib_leg_source`). Usar el 0.705 como **única** razón
+de entrada → **prohibido por diseño** (Fibonacci nunca opera solo).
+
+**Invalidaciones.** El Fibonacci del leg se invalida/redefine cuando el precio
+**cierra más allá del nivel `1` (origen)** en contra (el retroceso superó el 100 %
+→ probable cambio de estructura, D25 nuevo). Un leg cuyo destino es superado se
+**extiende**, no se invalida.
+
+**Edge cases.** Leg muy corto (`< fib_min_leg_atr`) → OTE estrecha e inoperable →
+no trazar. Múltiples legs anidados (HTF vs LTF) → un Fibonacci por TF; el HTF manda
+el bias, el LTF afina la OTE. Extensión repetida del destino en tendencias fuertes
+→ recalcular niveles pero **congelar** los de operaciones ya abiertas. Gap que
+salta un nivel → niveles siguen válidos como precios; el "toque" puede no ocurrir.
+
+**Pseudocódigo.**
+```
+function computeInstitutionalFib(dealingRange, sweeps, cfg):
+    leg = selectImpulsiveLeg(dealingRange, cfg.leg_source)        // BOS/CHoCH/MSS + displacement
+    T = leg.terminalExtreme
+    O = (cfg.anchor_origin == sweep_extreme && leg.originSweep != null)
+        ? leg.originSweep.extreme : leg.startExtreme
+    span = T - O
+    if abs(span) < cfg.min_leg_atr * ATR: return none            // trivial leg
+    retr = { r: T - r*span for r in cfg.retracement_levels }     // 0..1
+    proj = { e: O + e*span for e in cfg.projection_levels }      // >1 targets
+    ote  = [ T - cfg.ote_high*span , T - cfg.ote_low*span ]      // 0.618..0.786 band
+    return Fib(O, T, span, retr, proj, ote, optimal = T - cfg.ote_optimal*span)
+
+function scoreFibConfluence(poi, entry, fib, pricing, cfg):
+    // confirmation only — never a standalone trigger
+    inOTE = within(poi.zone, fib.ote) or within(entry, fib.ote)
+    pdOK  = coherent(pricing, poi.dir)                            // discount long / premium short
+    atOptimal = distance(entry, fib.optimal) <= cfg.ote_tol
+    return confluenceScore(inOTE, pdOK, atOptimal)               // feeds Scoring Engine factor 7
+```
+
+**Complejidad.** Cómputo del Fibonacci `O(1)` por leg (conjunto fijo de niveles);
+recálculo solo en eventos estructurales `O(1)`.
+
+**Casos de prueba.**
+- T1: leg alcista, POI en retroceso 0.70 en discount → `inOTE=true`, confluencia alta.
+- T2: POI en 0.5 (equilibrium) → fuera de OTE, sin bonus.
+- T3: entrada basada **solo** en tocar 0.705 sin POI/estructura → el motor **no
+  opera** (Fibonacci no gatilla).
+- T4: precio cierra bajo el nivel `1` (origen) → Fibonacci invalidado/redefinido.
+- T5: `fib_freeze_on_entry=true` + nuevo extremo tras abrir → niveles del trade
+  **no** cambian.
+
+**Falsos positivos.** Trazado sobre tramos correctivos etiquetados como impulso →
+mitigado por exigir displacement (D01) en el leg. Anclaje en swing arbitrario →
+prohibido por `fib_leg_source`.
+**Falsos negativos.** OTE válida omitida porque el leg quedó justo bajo
+`fib_min_leg_atr` → calibrar por perfil.
+
+**Relaciones.** Consume D25 (dealing range), D16 (sweep para el origen), D01/D08/
+D09/D10 (leg y su validez); **provee** a D29 (OTE es su subzona) y a D26–D28
+(equilibrium = nivel 0.5); alimenta el **factor 7 del Scoring Engine** (ENG-001
+§26) y los objetivos de TP (§30). **Regla dura (⛔):** `fib_standalone_entry = false`
+— el motor rechaza cualquier entrada cuya única justificación sea un nivel Fibonacci.
+
+---
+
 # Apéndice A — Matriz de cobertura (lista solicitada → sección)
 
 | # | Concepto solicitado | Sección | # | Concepto solicitado | Sección |
@@ -1731,6 +1929,10 @@ condiciona Volume Confirmation (D30) y los vetos (ENG-001 §24/§35).
 
 *(D07 reservado por cohesión de capas; los 30 conceptos solicitados están cubiertos.)*
 
+**Adenda obligatoria:** | 31 | **Fibonacci Institucional** | **D32** | — parte del
+Smart Money Engine, nunca indicador independiente; provee la OTE (D29) y los
+objetivos de proyección. |
+
 # Apéndice B — Grafo de dependencias de detectores
 
 ```
@@ -1746,7 +1948,9 @@ D02 ─► D18 FVG ─► D19 IFVG ; D18×2 ─► D20 BPR
 D01+D08/09 ─► D21 OrderBlock ─┬─► D22 Mitigation
                               ├─► D23 Breaker (+D09,+D16)
                               └─► D24 Rejection (+D16)
-D05..D10 ─► D25 DealingRange ─► D26/D27/D28 Premium/Discount/Eq ─► D29 OTE
+D05..D10 ─► D25 DealingRange ─┬─► D26/D27/D28 Premium/Discount/Eq ─► D29 OTE
+                              └─► D32 Institutional Fibonacci ─► D29 OTE + TP targets
+D16 Sweep ─► D32 (origin anchor)
 D31 Session ─► D11 (session liquidity) ;  D30 Volume ─► confirma D01/D08/D09/D16
 ```
 
@@ -1798,6 +2002,7 @@ D31 Session ─► D11 (session liquidity) ;  D30 Volume ─► confirma D01/D08
 | D29 OTE | `ote_low`(0.618), `ote_optimal`(0.705), `ote_high`(0.786), `ote_requires_poi`(true) |
 | D30 Volume | `volume_source`(perfil), `volume_ma_period`(20), `volume_spike_mult`(1.5) |
 | D31 Session | `session_timezone`(perfil), `killzones`(perfil), `outside_killzone_policy`(penalize) |
+| D32 Fibonacci | `fib_leg_source`(dealing_range_leg), `fib_anchor_origin`(sweep_extreme), `fib_freeze_on_entry`(true), `fib_standalone_entry`(false ⛔), `fib_min_leg_atr`(1.0) |
 
 ---
 

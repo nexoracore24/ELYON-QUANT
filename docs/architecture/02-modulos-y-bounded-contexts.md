@@ -12,6 +12,7 @@ invertir** talento y **qué comprar vs. construir**.
 | **Core** | Gestión de riesgo | `risk` | Construir, equipo senior |
 | **Core** | Plataforma de datos de mercado | `market_data` (+ `market-data-ingestor`) | Construir |
 | **Core** | Autoría de estrategias | `strategy_lab` | Construir |
+| **Core** | Registro y reproducción de decisiones | `decision_replay` | Construir (ENG-009) |
 | **Supporting** | Portfolio & posiciones | `portfolio` | Construir |
 | **Supporting** | Analítica & reporting | `analytics` | Construir + herramientas OSS |
 | **Supporting** | Marketplace | `marketplace` | Construir (fase 2) |
@@ -104,6 +105,23 @@ invertir** talento y **qué comprar vs. construir**.
 - **Responsabilidad:** *ledger* append-only e inmutable de acciones sensibles
   (órdenes, cambios de riesgo, accesos), trazabilidad regulatoria.
 - **Modelo:** *write-once*, particionado temporal; nunca se borra.
+
+### 2.13 `decision_replay` — Decision Replay Engine (Core)
+- **Responsabilidad:** registrar **todas** las decisiones del motor (ejecutadas y
+  **descartadas**) con el estado completo del mercado, y permitir **reproducir**
+  cualquier operación o señal descartada paso a paso.
+- **Agregados:** `DecisionRecord`, `ReplaySession`, `DecisionSnapshot`.
+- **Consume (eventos):** `DecisionEvaluated`, `TradeLifecycleUpdated` (async, fuera
+  del *hot path*).
+- **Modelo:** append-only, particionado por tiempo/símbolo; OLAP (ClickHouse) para
+  consulta + índice transaccional; *snapshot* de velas por referencia.
+- **Nota:** materializa la **Explicabilidad** (ENG-010) y se ancla al `audit`
+  ledger para decisiones con impacto en capital. Spec: ENG-009.
+
+> **Invariante transversal — Explainable AI (ENG-010):** toda decisión de cualquier
+> contexto que produzca una acción de trading debe ser **explicable** (qué detectó,
+> confirmó, descartó; pesos; score; reglas y vetos). *"Entró porque sí"* es un
+> fallo del sistema. Es un requisito de arquitectura, no una función opcional.
 
 ---
 
