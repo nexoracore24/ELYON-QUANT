@@ -12,6 +12,10 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > 📋 **Empieza aquí:** [Plan Maestro de Documentación](docs/00-governance/documentation-master-plan.md)
 > — la lista completa de TODOS los documentos a crear antes de programar,
 > organizada por fases (D0 → D7) y con el orden exacto de construcción.
+>
+> 🧊 **Estado del núcleo:** [Core Architecture Review v1.0](docs/architecture/core-architecture-review-v1.0.md)
+> — auditoría crítica de los 8 motores. Veredicto: **congelación condicional
+> `v1.0-rc1`** (madurez de diseño 84/100; 6 bloqueadores P0 por cerrar antes de GA).
 
 ---
 
