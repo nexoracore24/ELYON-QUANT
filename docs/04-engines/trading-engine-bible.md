@@ -866,6 +866,14 @@ El riesgo se gobierna en **tres capas**: por operación, por día y global. Es l
 autoridad suprema: **cualquier límite alcanzado es un veto (⛔)** que ignora
 cualquier score.
 
+> **Especificación completa → Risk Engine Bible (ENG-005).** Esta sección resume
+> los conceptos de riesgo desde la óptica del Trading Engine. La especificación
+> técnica oficial y determinista (fases pre/in/post-trade, límites por operación/
+> día/semana/mes/símbolo/sesión/estrategia/correlación, exposición, drawdown,
+> kill-switch, cooldown, cuentas fondeadas, position sizing, riesgo dinámico y
+> gestión de capital/beneficios) vive en `04-engines/risk-engine-bible.md`. El
+> contrato es **bloqueante**: ninguna orden live se rutea sin `RiskApproved`.
+
 ### 34.1 Por operación
 - **Riesgo fijo fraccional:** `risk_per_trade_pct` del equity (⚙️ def. 0.5 %;
   máx. recomendado 1 %). Alta convicción puede subir hasta `risk_per_trade_max_pct`

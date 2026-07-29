@@ -181,7 +181,7 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 | ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 v0.2 → `04-engines/smart-money-engine-bible.md` (31 detectores, contrato de 18 campos + integración) |
 | ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
 | ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ |
-| ENG-005 | **Risk Engine Spec** | Pre/post-trade, límites, exposición, VaR, kill-switch | Quant+CTO | ENG-001 | ⬜ |
+| ENG-005 | **Risk Engine Spec** | Pre/in/post-trade, límites (op/día/sem/mes/símbolo/sesión/estrategia/correlación), exposición, drawdown, kill-switch, cooldown, funded accounts, sizing, dinámico | Risk | ENG-001, ENG-011 | 🟨 → `04-engines/risk-engine-bible.md` |
 | ENG-006 | **Execution Engine Spec** | OMS, ciclo de orden, SOR, idempotencia, conciliación | CTO+Quant | ENG-005 | ⬜ |
 | ENG-007 | **Portfolio & Analytics Engine Spec** | Position keeping, PnL, métricas, tearsheets, atribución | Quant | ENG-006 | ⬜ |
 | ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ |
