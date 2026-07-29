@@ -200,7 +200,7 @@ licenciamiento y cumplimiento aprobados.*
 | DAT-000 | **Database Design** | Esquemas por módulo, modelo físico, índices, particionado, series temporales | CTO | ARC-006, ENG-* | ⬜ | — |
 | DAT-001 | **Data Governance & Retention** | Clasificación, retención, PII, calidad, linaje | Security+CTO | DAT-000 | ⬜ | — |
 | API-000 | **API Design (REST/WS)** | Recursos, versionado, paginación, errores (RFC7807), WS | CTO | ARC-008 | ⬜ | — |
-| API-001 | **Async / Event API Design** | Topics, envelopes, esquemas Avro, compatibilidad | CTO | ARC-007 | ⬜ | — |
+| API-001 | **Async / Event API Design** | Topics, envelopes, esquemas Avro, compatibilidad | CTO | ARC-007 | 🟡 → `06-api/core-contracts-v1.0.md` (Core Contracts v1.0: C1–C9 congela interfaces inter-motor + versionado/compat/deprecación/testing/breaking) | — |
 | API-002 | **Public API & SDK Design** | API pública, rate-limits por plan, SDKs Python/TS | CTO+PM | API-000 | ⬜ | — |
 | SEC-000 | **Security Design & Threat Model** | AuthN/Z, multi-tenant, secretos, STRIDE, defensa en profundidad | Security | ARC-000, DAT-001 | 🟨 | `architecture/11` |
 | SEC-001 | **Licensing System Design** | Modelo de licencias, activación, verificación, anti-abuso, entitlements | CTO+PM | SEC-000, PRD-005 | ⬜ | — |
