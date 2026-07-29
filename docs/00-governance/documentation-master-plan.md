@@ -182,7 +182,7 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 | ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
 | ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ |
 | ENG-005 | **Risk Engine Spec** | Pre/in/post-trade, límites (op/día/sem/mes/símbolo/sesión/estrategia/correlación), exposición, drawdown, kill-switch, cooldown, funded accounts, sizing, dinámico | Risk | ENG-001, ENG-011 | 🟨 → `04-engines/risk-engine-bible.md` |
-| ENG-006 | **Execution Engine Spec** | OMS, ciclo de orden, SOR, idempotencia, conciliación | CTO+Quant | ENG-005 | ⬜ |
+| ENG-006 | **Execution Engine Bible (OMS)** | Ciclo de vida completo de la orden, máquina de estados, routing, fills, position mgmt, CQRS+ES, outbox, sagas, exactly-once, circuit breakers, health, DLQ, observabilidad, recovery; +ADR | Execution | ENG-005, ENG-000 | 🟨 → `04-engines/execution-engine-bible.md` |
 | ENG-007 | **Portfolio & Analytics Engine Spec** | Position keeping, PnL, métricas, tearsheets, atribución | Quant | ENG-006 | ⬜ |
 | ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ |
 | ENG-009 | **Decision Replay Engine Spec** | Registro de **todas** las decisiones (ejecutadas + descartadas) y reproducción paso a paso | CTO | ENG-001, ENG-002 | 🟨 → `04-engines/decision-replay-engine-spec.md` |
