@@ -178,7 +178,7 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 |----|-----------|-----------|-------|-----------|--------|
 | ENG-000 | **Market Data Engine Spec** | Ingesta, normalización, catálogo, calidad, históricos | Quant | ARC-006 | ⬜ |
 | ENG-001 | **Trading / Strategy Engine Spec** | Modelo de estrategia, señales, indicadores, ciclo de vida | Quant | ENG-000 | 🟨 → `04-engines/trading-engine-bible.md` |
-| ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 → `04-engines/smart-money-engine-bible.md` (31 detectores) |
+| ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 v0.2 → `04-engines/smart-money-engine-bible.md` (31 detectores, contrato de 18 campos + integración) |
 | ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
 | ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ |
 | ENG-005 | **Risk Engine Spec** | Pre/post-trade, límites, exposición, VaR, kill-switch | Quant+CTO | ENG-001 | ⬜ |

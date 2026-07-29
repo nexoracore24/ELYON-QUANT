@@ -4,9 +4,14 @@ id: ENG-002 (Smart Money Engine, especificación técnica de detectores)
 owner: Quant Lead
 reviewers: [CTO/Principal Architect, ML Lead, QA Lead]
 status: draft
-version: 0.1
-last_updated: 2026-07-28
+version: 0.2
+last_updated: 2026-07-29
 supersedes: parcialmente cubierto en trading-engine-bible.md §6–§20
+changelog:
+  - v0.2 (2026-07-29): contrato de detector ampliado a 18 campos obligatorios;
+    añadidos Entradas/Salidas y Diagrama lógico por detector (Apéndice E) y el
+    capítulo de Integración con Market Context / Trading / Scoring / Risk (Apéndice F).
+  - v0.1 (2026-07-28): 31 detectores (D01–D32) con contrato de 15 campos.
 -->
 
 # ELYON QUANT — SMART MONEY ENGINE BIBLE
@@ -71,11 +76,35 @@ exactamente qué es un Order Block, cuándo está "sin mitigar" y cómo se calcu
   ≡ `L_j ≤ hi ∧ H_j ≥ lo`. "Precio cierra a través" ≡ `C_j` fuera de `[lo,hi]`
   en la dirección de invalidación.
 
-### 0.4 Plantilla del contrato de detector
-Cada detector se documenta con **14 campos fijos**:
-`Definición matemática · Objetivo · Parámetros · Reglas de detección · Casos
-válidos · Casos inválidos · Invalidaciones · Edge cases · Pseudocódigo ·
-Complejidad · Casos de prueba · Falsos positivos · Falsos negativos · Relaciones`.
+### 0.4 Plantilla del contrato de detector (18 campos obligatorios)
+Cada detector cumple un contrato de **18 campos**. Para no duplicar contenido, los
+campos se reparten entre el **cuerpo** del detector (Capas 0–7) y los apéndices
+transversales **E** (I/O + diagrama lógico) y **F** (integración de sistema):
+
+| # | Campo obligatorio | Dónde vive |
+|---|-------------------|-----------|
+| 1 | **Objetivo** | cuerpo del detector |
+| 2 | **Definición formal** | cuerpo ("Definición matemática") |
+| 3 | **Entradas** | **Apéndice E** (tabla I/O por detector) |
+| 4 | **Salidas** | **Apéndice E** (tabla I/O por detector) |
+| 5 | **Parámetros configurables** | cuerpo + Apéndice D (catálogo) |
+| 6 | **Algoritmo paso a paso** | cuerpo ("Reglas de detección" = pasos numerados) |
+| 7 | **Pseudocódigo** | cuerpo |
+| 8 | **Diagrama lógico** | **Apéndice E** (flujo por detector) |
+| 9 | **Casos válidos** | cuerpo |
+| 10 | **Casos inválidos** | cuerpo |
+| 11 | **Invalidaciones** | cuerpo |
+| 12 | **Edge cases** | cuerpo |
+| 13 | **Complejidad computacional** | cuerpo |
+| 14 | **Casos de prueba** | cuerpo |
+| 15 | **Falsos positivos** | cuerpo |
+| 16 | **Falsos negativos** | cuerpo |
+| 17 | **Dependencias** | cuerpo ("Relaciones") + Apéndice B (DAG) |
+| 18 | **Integración con otros detectores / sistemas** | cuerpo ("Relaciones") + **Apéndice F** |
+
+> Regla: **ningún detector puede quedar sin cualquiera de los 18 campos.** La
+> completitud se verifica en CI (test de documentación: cada `D0x` debe resolver
+> sus 18 campos entre cuerpo y apéndices).
 
 ### 0.5 Orden de ejecución (pipeline / DAG de dependencias)
 Los detectores se ejecutan por capas; cada capa consume la anterior. Se documenta
@@ -2008,8 +2037,223 @@ D31 Session ─► D11 (session liquidity) ;  D30 Volume ─► confirma D01/D08
 
 ---
 
-> **Versión 0.1 — Borrador (🟨).** Estándar oficial de detección Smart Money de
-> ELYON QUANT. Su aprobación (🟩) requiere revisión de Quant Lead, CTO y QA Lead, y
-> es prerrequisito del gate D4 junto al Trading Engine Bible (ENG-001). Todo cambio de
-> reglas/umbrales se gestiona por RFC/ADR y se re-valida con golden datasets y
-> backtesting (ENG-004).
+# Apéndice E — Entradas / Salidas y Diagrama lógico por detector
+
+> Completa los campos **3 (Entradas)**, **4 (Salidas)** y **8 (Diagrama lógico)**
+> del contrato (§0.4) para los 31 detectores. Toda entrada es información de barras
+> `≤ t` (no look-ahead); toda salida es un registro tipado con `origin_index`,
+> `confirm_index`, `state` y `params_hash`. Los **parámetros efectivos** se resuelven
+> vía Market DNA (`dna.override ?? default`, ENG-011 §8).
+
+### E.1 Tabla de Entradas / Salidas (31 detectores)
+
+| Detector | Entradas | Salidas |
+|----------|----------|---------|
+| D01 Displacement | `series` (velas cerradas TF), `ATR` | `Displacement{a,b,dir,move}` \| `none` |
+| D02 Imbalance | `series`, `ATR` | `Imbalance{zone,dir,size,state}` \| `none` |
+| D03 Swing High | `series`, `k`(lookback) | `SwingHigh{index,price,grade,confirm_index,label}` |
+| D04 Swing Low | `series`, `k` | `SwingLow{index,price,grade,confirm_index,label}` |
+| D05 External Structure | swings mayores (D03/D04) | `{trend_state,protected_high/low,labeled_swings}` |
+| D06 Internal Structure | swings menores, tramo externo (D05) | `{internal_swings,internal_BOS/CHoCH}` |
+| D08 BOS | `trend_state`(D05), swings, D01 | `BOS{dir,level,break_index,displacement}` \| `WeakBOS`/`none` |
+| D09 CHoCH | `trend_state`, `protected_level`, D01, D16 | `CHoCH{dir,level,j,sweptLiquidity}` \| `none` |
+| D10 MSS | `pendingCHoCH`(D09), D08, D16 | `MSS{dir,choch_index,confirm_index}` \| `none` |
+| D11 Liquidity | swings(D03/D04), equal(D14/D15), extremos sesión | `Pool{level,type,origin,strength,state}` |
+| D12 BSL | pools(D11), `price` | `target_bsl` (pool BSL relevante) |
+| D13 SSL | pools(D11), `price` | `target_ssl` (pool SSL relevante) |
+| D14 Equal Highs | swing highs(D03), `ATR` | `EqualHighs{level,touches,indices,strength}` |
+| D15 Equal Lows | swing lows(D04), `ATR` | `EqualLows{level,touches,indices,strength}` |
+| D16 Liquidity Sweep | pools(D11–D15), `series`, `ATR` | `Sweep{pool,dir,penetration,index}` (+ pool→swept) |
+| D17 Inducement | POI, estructura interna(D06), sweeps(D16), `price` | `Inducement{level,state∈{TAKEN,PENDING,ABSENT}}` |
+| D18 FVG | `series`, `ATR`, D01 | `FVG{dir,zone,CE,state,origin_index}` \| `none` |
+| D19 Inverse FVG | FVG invalidado(D18), `flip_candle`, D09 | `IFVG{dir,zone,origin,flip_index,state}` \| `none` |
+| D20 Balanced Price Range | FVG activos opuestos(D18) | `BPR{zone,indices}` \| `none` |
+| D21 Order Block | D01, D08/D09, D18 | `POI{order_block,dir,zone,mean,state,confidence}` |
+| D22 Mitigation Block | D01, extremo previo, sweeps(D16) | `POI{mitigation_block,...}` \| `none` |
+| D23 Breaker Block | OB invalidado(D21), D09, D16 | `POI{breaker,dir,zone,...}` \| `none` |
+| D24 Rejection Block | `series`, sweeps(D16) | `POI{rejection_block,dir,zone,...}` \| `none` |
+| D25 Dealing Range | eventos estructurales(D08–D10) | `Range{low,high,ref_event,fibs}` |
+| D26/27/28 Premium/Discount/Equilibrium | `price`/POI, `Range`(D25) | `pricing ∈ {PREMIUM,DISCOUNT,EQUILIBRIUM}` |
+| D29 OTE | leg(D25), D32 | `OTE{zone,optimal}` + `at_optimal` |
+| D30 Volume Confirmation | `series`(volumen), `dna.volume_source` | `CONFIRMED(ratio)`\|`NOT_CONFIRMED`\|`UNAVAILABLE` |
+| D31 Session Context | `ts_utc`, `dna`(timezone,killzones) | `SessionCtx{session,killzone,in_killzone,in_efficiency}` |
+| D32 Institutional Fibonacci | dealing range(D25), sweeps(D16), `ATR` | `Fib{O,T,span,retr,proj,ote,optimal}` \| `none` |
+
+### E.2 Diagramas lógicos (flujo determinista por detector)
+
+> Notación: `[cond]` = condición booleana; `►` = emite; `⊘` = `none`; los
+> parámetros se leen del Market DNA efectivo.
+
+**D01 Displacement / D02 Imbalance (primitivos)**
+```
+D01: ventana[a..b] → [move≥disp·ATR] & [body_ratio≥th] & [misma dir] ► Displacement ⋮ else ⊘
+D02: tríada[i-1,i,i+1] → [gap≥min_size] ? ► Imbalance(zone,dir) : ⊘ → track state(unfilled→partial→filled)
+```
+
+**D03 Swing High / D04 Swing Low (espejo)**
+```
+para i con k velas a cada lado:
+   [H_i > H_{i±j} ∀j∈1..k]  (Swing High)   → confirmado en i+k ► SwingHigh
+   [L_i < L_{i±j} ∀j∈1..k]  (Swing Low)     → confirmado en i+k ► SwingLow
+   bordes → PENDING ; i<k → INSUFFICIENT ; luego etiquetar HH/HL/LH/LL vs previo
+```
+
+**D05 External / D06 Internal Structure**
+```
+nuevo swing confirmado → etiqueta(HH/HL/LH/LL) → patrón{HH,HL}=BULL / {LH,LL}=BEAR / else RANGE
+                       → recalcular protected_high/low   (D05: grado mayor; D06: dentro del tramo externo)
+```
+
+**D08 BOS / D09 CHoCH**
+```
+D08 (a favor tendencia): cierre supera último swing extremo → [displacement?] ► BOS : WeakBOS/⊘
+D09 (contra tendencia):  cierre supera protected_level      → [displacement?] ► CHoCH(+sweptLiq?) : Weak/⊘
+   fakeout dentro de failure_bars → *_failed
+```
+
+**D10 MSS**
+```
+CHoCH(dir) → abrir ventana confirm_bars → [BOS(dir) follow-through] OR [displacement fuerte + sweep]
+          ► MSS(dir) : (sin confirmación) ⊘ ; CHoCH opuesto tras MSS → mss_reversed
+```
+
+**D11 Liquidity / D12 BSL / D13 SSL**
+```
+extremo/equal/sesión confirmado → upsert Pool (fusiona a <tol, strength++) 
+   filtrar type=BSL & level>price ► target_bsl   |   type=SSL & level<price ► target_ssl
+   sweep(D16) → state=swept
+```
+
+**D14 Equal Highs / D15 Equal Lows (espejo)**
+```
+swings(mismo tipo) → agrupar por banda [max-min ≤ equal_tol·ATR] con min_separation
+   [cluster.size ≥ min_touches] ► EqualHighs/EqualLows(level,touches) : ⊘
+```
+
+**D16 Liquidity Sweep**
+```
+para pool cercano:
+   BSL: [H_j > p+pen] & [C_j < p] & [upper_wick/range ≥ ratio] ► Sweep(bearish bias) + pool.swept
+   SSL: [L_j < p-pen] & [C_j > p] & [lower_wick/range ≥ ratio] ► Sweep(bullish bias) + pool.swept
+   cierre MÁS ALLÁ del nivel → NO es sweep (es breakout → D08/D09)
+```
+
+**D17 Inducement**
+```
+POI objetivo → buscar swing interno opuesto entre price y POI (=IDM)
+   IDM ausente ► ABSENT | IDM barrido antes de llegar al POI ► TAKEN (válido) | si no ► PENDING (esperar)
+```
+
+**D18 FVG / D19 IFVG / D20 BPR**
+```
+D18: tríada → [gap≥min_size] & [vela central displacement] ► FVG(zone,CE) ; update(partial/filled/invalidated)
+D19: FVG con cierre-a-través (invalidated) → polaridad opuesta ► IFVG (refuerzo si CHoCH)
+D20: FVG_bull.zone ∩ FVG_bear.zone (≥min_overlap, ≤max_gap_bars) ► BPR(intersección)
+```
+
+**D21 OB / D22 Mitigation / D23 Breaker / D24 Rejection (marco POI)**
+```
+D21: displacement+BOS/CHoCH → última vela contraria = OB ► POI{fresh} ; cierre a través → invalidated
+D22: cambio de estructura SIN sweep del extremo previo → última vela contraria ► mitigation_block
+D23: OB invalidado + CHoCH(dir opuesto) → polaridad invertida ► breaker
+D24: velas de mecha dominante que barren pool → zona de mechas ► rejection_block
+   común: tested(toca) → mitigated(≥umbral) → invalidated(cierre a través)
+```
+
+**D25 Dealing Range → D26/27/28 Pricing → D29 OTE / D32 Fibonacci**
+```
+evento estructural → fijar Range[low,high] (leg impulsivo) → fibs
+   pos=(price-low)/(high-low): >0.5+band ► PREMIUM | <0.5-band ► DISCOUNT | else EQUILIBRIUM
+   D32: O(origen=sweep_extreme), T(destino) → retr=T-r·span, proj=O+e·span, OTE=[0.618..0.786]
+   D29: POI/entry ∈ OTE band & pricing coherente ► score OTE (⛔ fib nunca gatilla solo)
+```
+
+**D30 Volume / D31 Session (contexto)**
+```
+D30: [V_j ≥ SMA(V,period)·spike_mult] ► CONFIRMED : NOT_CONFIRMED ; sin datos ► UNAVAILABLE
+D31: ts_utc → toZone(IANA,DST) → clasifica sesión/killzone → in_killzone / in_efficiency_window
+```
+
+---
+
+# Apéndice F — Integración de los detectores con Market Context, Trading, Scoring y Risk
+
+> Completa el campo **18 (integración de sistema)** del contrato. La integración
+> **entre detectores** ya vive en "Relaciones" de cada cuerpo y en el DAG
+> (Apéndice B); aquí se documenta la integración con los **otros motores**.
+
+### F.1 Con el **Market Context Engine** (ENG-011) — *aguas arriba*
+- **Gate previo (⛔):** ningún detector de esta Biblia se ejecuta si el gate del MCE
+  es `FAIL`. El MCE decide *si* hay que leer estructura; el Smart Money Engine la lee.
+- **Market DNA → parámetros efectivos:** el MCE (vía Market DNA) provee los umbrales
+  con los que corren los detectores (`equal_level_tol`, `sweep_min_penetration`,
+  `displacement_atr_mult`, `fvg_min_size`, `fib_min_leg_atr`, `swing_lookback`…).
+  **Adapta filtros, no reglas** (la definición de cada detector es invariante).
+- **Régimen → priorización (no override):** el `regime` del MCE orienta *qué*
+  salidas se ponderan más aguas abajo (TREND → OB/continuación a favor; RANGE/ACC-DIST
+  → breaker/rejection/reversión en extremos). Los detectores **siempre** emiten lo que
+  detectan; la priorización ocurre en el Scoring, no alterando la detección.
+- **Reutilización:** el MCE consume internamente D14/D15 (equal), D16 (sweep) y D31
+  (sesión) para su propio análisis de liquidez/manipulación/sesión — misma
+  especificación, sin duplicar lógica.
+
+### F.2 Con el **Trading Engine** (ENG-001) — *modelo de entrada*
+El modelo de entrada canónico (ENG-001 §27) es una **secuencia de detectores**:
+```
+D31 killzone → D25/D32 bias & OTE → D16 sweep → D09 CHoCH(+D01) → D21/D23/D24 POI
+            → D18/D19 FVG/IFVG → D29 OTE ∩ POI ∩ discount(D27) → ARMED → ENTER
+```
+- Los detectores producen las **features**; el Trading Engine las **orquesta** en su
+  máquina de estados (`CONTEXT_GATE → SCANNING → ARMED → SCORING → ENTERING → MANAGING`).
+- **Anclas de gestión:** D16 (mecha del sweep) y D21/D24 (zona del POI) definen el
+  **SL**; D11–D15 (pools) y D32 (proyecciones) definen el **TP** (ENG-001 §29/§30).
+- **Invalidación de setup:** la invalidación de cualquier detector clave del setup
+  (OB roto, FVG rellenado, CHoCH fallido) cancela el `ARMED` (no repaint: la
+  invalidación es un evento nuevo, no reescribe el pasado).
+
+### F.3 Con el **Scoring Engine** (ENG-001 §26) — *mapa factor → detectores*
+Cada factor del Entry Score se alimenta de detectores concretos:
+
+| Factor de scoring (peso) | Detectores que lo alimentan |
+|--------------------------|-----------------------------|
+| 1. HTF bias alignment (15) | D05/D06 (estructura), D25 (rango), + `MarketContext.alignment` |
+| 2. Estructura LTF CHoCH/BOS (15) | D08, D09, D10, D01 |
+| 3. Liquidity sweep (12) | D16 (+ D11–D15) |
+| 4. Calidad del POI (12) | D21, D22, D23, D24 (+ D17 inducement) |
+| 5. Imbalance FVG/IFVG (10) | D18, D19, D20 |
+| 6. Premium/Discount (8) | D25, D26, D27, D28 |
+| 7. OTE / Fibonacci (6) | D29, D32 (⛔ nunca gatilla solo) |
+| 8. Killzone/sesión (8) | D31 (+ `MarketContext.session`) |
+| 9. Régimen ATR + spread (6) | `MarketContext` (ENG-011) |
+| 10. Volumen (4) | D30 |
+| 11. Liquidez objetivo (4) | D11, D12, D13 |
+
+- **Vetos duros** del scoring que dependen de detectores: setup **sin** D16 (sweep),
+  POI **mitigado** (D21–D24 `state`), entrada en `EQUILIBRIUM` (D28), **sin** D18 en
+  el desplazamiento → bajan/anulan el score.
+- **Determinismo del score:** como cada factor mapea a salidas deterministas de
+  detectores, la suma es **exacta y explicable** (base de la Explicabilidad, ENG-010).
+
+### F.4 Con el **Risk Engine** (ENG-005) — *anclas y protección*
+- **SL objetivo:** D16 (extremo de la mecha del barrido) y D21/D24 (borde del POI) →
+  Risk deriva el `1R` y el *position sizing* del SL (ENG-001 §29/§34).
+- **TP objetivo:** D11–D15 (pools de liquidez) y D32 (proyecciones 1.272–2.618) →
+  Risk valida el `RR mínimo` (⛔ no opera si `RR < min_rr`).
+- **Invalidación → riesgo:** el nivel de invalidación de cada detector es el punto de
+  "tesis rota"; Risk lo usa como cota dura del SL (`never_widen_sl`).
+- **Kill-switch de contexto:** manipulación/expansión extrema (detectadas vía D16 en
+  cadena y volatilidad del MCE) pueden pausar entradas y proteger lo abierto,
+  coordinado con el kill-switch de Risk (ENG-005 §34.4).
+
+---
+
+> **Versión 0.2 — Borrador (🟨).** Estándar oficial de detección Smart Money de
+> ELYON QUANT: **31 detectores** (D01–D32) con el **contrato de 18 campos** (§0.4)
+> completado por los apéndices E (I/O + diagrama lógico) y F (integración con Market
+> Context, Trading, Scoring y Risk). **Reglas obligatorias garantizadas:**
+> determinismo total, cero interpretación humana, **no-repaint** tras confirmación,
+> reproducibilidad bit a bit, parámetros 100 % configurables (vía Market DNA) y
+> validación por tests unitarios (golden datasets, Apéndice C). Su aprobación (🟩)
+> requiere revisión de Quant Lead, CTO y QA Lead; prerrequisito del gate D4 junto al
+> Trading Engine Bible (ENG-001). Todo cambio de reglas/umbrales se gestiona por
+> RFC/ADR y se re-valida con golden datasets y backtesting (ENG-004).
