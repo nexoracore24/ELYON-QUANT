@@ -176,7 +176,7 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 
 | ID | Documento | Propósito | Owner | Depende de | Estado |
 |----|-----------|-----------|-------|-----------|--------|
-| ENG-000 | **Market Data Engine Spec** | Ingesta, normalización, catálogo, calidad, históricos | Quant | ARC-006 | ⬜ |
+| ENG-000 | **Market Data Engine Bible** | **SSOT de datos**: ingesta/ACL, tick/candle/MTF builder, sesión/spread/volumen/ATR, snapshots, histórico versionado, calidad, dedup/orden/gaps, no-repaint, reproducibilidad | Platform/Data | ARC-006 | 🟨 → `04-engines/market-data-engine-bible.md` |
 | ENG-001 | **Trading / Strategy Engine Spec** | Modelo de estrategia, señales, indicadores, ciclo de vida | Quant | ENG-000 | 🟨 → `04-engines/trading-engine-bible.md` |
 | ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 v0.2 → `04-engines/smart-money-engine-bible.md` (31 detectores, contrato de 18 campos + integración) |
 | ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
