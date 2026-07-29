@@ -111,6 +111,13 @@ Cada perfil define, como mínimo: `pip_size`/`tick_size`, `max_spread`,
 `displacement_atr_mult`, `news_provider` y `contract_multiplier`. El núcleo del
 motor **no** conoce el activo: consume el perfil.
 
+> El `instrument_profile` se formaliza y amplía como **MARKET DNA** en el
+> **Market Context Engine (ENG-011, §8)**: perfil por activo (XAUUSD, EURUSD,
+> GBPUSD, NAS100, US30, BTCUSD, ETHUSD…) que adapta **filtros/sensibilidades**
+> (no reglas). Además, antes de que este motor busque nada, el Market Context
+> Engine ejecuta un **gate de contexto**: si el contexto no supera el mínimo, el
+> motor **no escanea** (ver Apéndice B, estado `CONTEXT_GATE`).
+
 ---
 
 # 4. Timeframes utilizados
@@ -1122,6 +1129,10 @@ institucional auditable**.
 
 ```
         ┌─────────────┐
+        │ CONTEXT_GATE│  Market Context Engine (ENG-011) evalúa el contexto.
+        └──────┬──────┘  gate = FAIL → no se escanea (vuelve a esperar vela).
+               │ gate = PASS (context_score ≥ umbral, sin vetos)
+        ┌──────▼──────┐
         │  SCANNING   │  (mapea estructura, liquidez, POIs, bias MTF)
         └──────┬──────┘
                │ precio llega a POI en bias

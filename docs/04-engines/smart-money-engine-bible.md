@@ -83,6 +83,8 @@ en dependencia-orden (no en el orden de la lista original; ver **matriz de
 cobertura**, Apéndice A, para el mapeo 1:1 con la lista solicitada).
 
 ```
+Capa -1 Gate de contexto:  MARKET CONTEXT ENGINE (ENG-011) — se ejecuta ANTES.
+                           Si su gate = FAIL, NADA de lo de abajo se ejecuta.
 Capa 0  Primitivos:        Displacement, Imbalance
 Capa 1  Estructura:        Swing High, Swing Low → Internal/External Structure
 Capa 2  Eventos:           BOS, CHoCH, MSS

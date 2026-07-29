@@ -32,10 +32,15 @@ cuantitativo:
 9. **Connectivity** — adaptadores a MT5, Interactive Brokers, Binance, etc.
 10. **Decision Replay Engine** — registro de **todas** las decisiones (ejecutadas y
     descartadas) y reproducción paso a paso de cualquier señal.
+11. **Market Context Engine** — **primer motor que se ejecuta**: determina el
+    contexto/régimen del mercado y emite un **Context Score (0–100)**; si no supera
+    el mínimo, el resto del motor **ni busca entradas**. Incluye **Market DNA**
+    (perfil por activo que adapta filtros, no reglas).
 
 El motor SMC incluye **Fibonacci Institucional** (anclado a estructura, nunca
 indicador independiente; provee la OTE) y es **explicable por diseño**: nunca
-responde *"entró porque sí"*.
+responde *"entró porque sí"*. El pipeline se abre siempre con el **gate de
+contexto** (Market Context Engine).
 
 ---
 

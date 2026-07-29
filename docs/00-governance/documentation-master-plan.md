@@ -187,6 +187,7 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 | ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ |
 | ENG-009 | **Decision Replay Engine Spec** | Registro de **todas** las decisiones (ejecutadas + descartadas) y reproducción paso a paso | CTO | ENG-001, ENG-002 | 🟨 → `04-engines/decision-replay-engine-spec.md` |
 | ENG-010 | **Explainable AI (XAI) Standard** | Invariante de núcleo: toda decisión explicable (qué detectó/confirmó/descartó, pesos, score, reglas, vetos) | ML | ENG-001, ENG-009 | 🟨 → `04-engines/explainable-ai-spec.md` |
+| ENG-011 | **Market Context Engine (+ Market DNA)** | **Primer gate**: régimen/contexto/calidad → Context Score (0–100); Market DNA por activo (adapta filtros, no reglas) | Quant | ENG-000 | 🟨 → `04-engines/market-context-engine-spec.md` |
 
 ---
 

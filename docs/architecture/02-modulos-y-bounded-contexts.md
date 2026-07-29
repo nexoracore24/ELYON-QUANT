@@ -12,6 +12,7 @@ invertir** talento y **qué comprar vs. construir**.
 | **Core** | Gestión de riesgo | `risk` | Construir, equipo senior |
 | **Core** | Plataforma de datos de mercado | `market_data` (+ `market-data-ingestor`) | Construir |
 | **Core** | Autoría de estrategias | `strategy_lab` | Construir |
+| **Core** | Contexto de mercado (primer gate) | `market_context` | Construir (ENG-011) |
 | **Core** | Registro y reproducción de decisiones | `decision_replay` | Construir (ENG-009) |
 | **Supporting** | Portfolio & posiciones | `portfolio` | Construir |
 | **Supporting** | Analítica & reporting | `analytics` | Construir + herramientas OSS |
@@ -106,7 +107,19 @@ invertir** talento y **qué comprar vs. construir**.
   (órdenes, cambios de riesgo, accesos), trazabilidad regulatoria.
 - **Modelo:** *write-once*, particionado temporal; nunca se borra.
 
-### 2.13 `decision_replay` — Decision Replay Engine (Core)
+### 2.13 `market_context` — Market Context Engine (Core, primer gate)
+- **Responsabilidad:** determinar el **contexto completo del mercado** (régimen,
+  tendencia, consolidación, expansión, compresión, acumulación, distribución,
+  manipulación, volatilidad, contexto HTF/MTF/LTF, killzones, liquidez, riesgo de
+  noticias, calidad) y emitir un **Context Score (0–100)** con decisión de **gate**.
+- **Se ejecuta ANTES** que `strategy_lab`/Smart Money Engine: si el gate falla, el
+  resto del motor **no busca entradas**.
+- **Agregados:** `MarketContext`, `MarketDNA` (perfil por activo), `RegimeState`.
+- **Publica:** `MarketContextEvaluated`.
+- **Market DNA:** adapta **filtros/sensibilidades** por activo, **sin** modificar
+  las reglas de la estrategia. Spec: ENG-011.
+
+### 2.14 `decision_replay` — Decision Replay Engine (Core)
 - **Responsabilidad:** registrar **todas** las decisiones del motor (ejecutadas y
   **descartadas**) con el estado completo del mercado, y permitir **reproducir**
   cualquier operación o señal descartada paso a paso.
