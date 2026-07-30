@@ -17,6 +17,7 @@ Formato basado en Michael Nygard. Plantilla en [`template.md`](template.md).
 | [0004](0004-event-driven-integration.md) | Integración event-driven entre bounded contexts | Accepted |
 | [0005](0005-database-per-module.md) | Base de datos (esquema) por módulo | Accepted |
 | [0006](0006-deterministic-computing.md) | Computación determinista (decimal-first, EDCS) | Accepted |
+| [0007](0007-risk-budget-concurrency.md) | Concurrencia del presupuesto de riesgo (reserva + CAS) | Accepted |
 
 ## Cuándo escribir un ADR
 
