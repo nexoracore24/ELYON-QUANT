@@ -179,12 +179,12 @@ datos → estrategia/SMC/IA → backtest → riesgo → ejecución → portfolio
 | ENG-000 | **Market Data Engine Bible** | **SSOT de datos**: ingesta/ACL, tick/candle/MTF builder, sesión/spread/volumen/ATR, snapshots, histórico versionado, calidad, dedup/orden/gaps, no-repaint, reproducibilidad | Platform/Data | ARC-006 | 🟨 → `04-engines/market-data-engine-bible.md` |
 | ENG-001 | **Trading / Strategy Engine Spec** | Modelo de estrategia, señales, indicadores, ciclo de vida | Quant | ENG-000 | 🟨 → `04-engines/trading-engine-bible.md` |
 | ENG-002 | **Smart Money Engine Spec** | Conceptos SMC/ICT: order blocks, liquidez, FVG, BOS/CHoCH, estructura + **Fibonacci Institucional (D32)** | Quant | ENG-000, ENG-001 | 🟨 v0.2 → `04-engines/smart-money-engine-bible.md` (31 detectores, contrato de 18 campos + integración) |
-| ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ |
-| ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ |
+| ENG-003 | **AI Engine Spec** | Modelos, features, entrenamiento, inferencia, MLOps, guardrails | ML | ENG-000, ENG-001 | ⬜ (interfaz core congelada: stub `ai.v1` en `06-api/core-contract-stubs-v1.0.md`) |
+| ENG-004 | **Backtesting Engine Spec** | Simulación determinista, reproducibilidad, walk-forward, métricas | Quant | ENG-001, ENG-002 | ⬜ (interfaz core congelada: stub `backtest.v1`) |
 | ENG-005 | **Risk Engine Spec** | Pre/in/post-trade, límites (op/día/sem/mes/símbolo/sesión/estrategia/correlación), exposición, drawdown, kill-switch, cooldown, funded accounts, sizing, dinámico | Risk | ENG-001, ENG-011 | 🟨 → `04-engines/risk-engine-bible.md` |
 | ENG-006 | **Execution Engine Bible (OMS)** | Ciclo de vida completo de la orden, máquina de estados, routing, fills, position mgmt, CQRS+ES, outbox, sagas, exactly-once, circuit breakers, health, DLQ, observabilidad, recovery; +ADR | Execution | ENG-005, ENG-000 | 🟨 → `04-engines/execution-engine-bible.md` |
-| ENG-007 | **Portfolio & Analytics Engine Spec** | Position keeping, PnL, métricas, tearsheets, atribución | Quant | ENG-006 | ⬜ |
-| ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ |
+| ENG-007 | **Portfolio & Analytics Engine Spec** | Position keeping, PnL, métricas, tearsheets, atribución | Quant | ENG-006 | ⬜ (interfaz core congelada: stub `portfolio.v1`) |
+| ENG-008 | **Broker/Exchange Connectivity Spec** | ACLs: MT5, IB, Binance…; mapeo de contratos | CTO | ENG-006 | ⬜ (interfaz core congelada: stub `broker-connectivity.v1`) |
 | ENG-009 | **Decision Replay Engine Spec** | Registro de **todas** las decisiones (ejecutadas + descartadas) y reproducción paso a paso | CTO | ENG-001, ENG-002 | 🟨 → `04-engines/decision-replay-engine-spec.md` |
 | ENG-010 | **Explainable AI (XAI) Standard** | Invariante de núcleo: toda decisión explicable (qué detectó/confirmó/descartó, pesos, score, reglas, vetos) | ML | ENG-001, ENG-009 | 🟨 → `04-engines/explainable-ai-spec.md` |
 | ENG-011 | **Market Context Engine (+ Market DNA)** | **Primer gate**: régimen/contexto/calidad → Context Score (0–100); Market DNA por activo (adapta filtros, no reglas) | Quant | ENG-000 | 🟨 → `04-engines/market-context-engine-spec.md` |

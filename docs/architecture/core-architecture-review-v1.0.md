@@ -402,3 +402,33 @@ P0 resueltos —trabajo acotado y sin cambios de fronteras— la arquitectura se
 
 > **Estado:** `v1.0-rc1` — congelación condicional. Revisar este documento tras cerrar
 > el checklist §9.2 para promover a `v1.0` GA.
+
+---
+
+## 10. ADDENDUM (2026-07-29) — Cierre de los 6 bloqueadores P0
+
+Los seis P0 del checklist §9.2 están **cerrados a nivel de diseño**:
+
+| P0 | Cierre | Documento |
+|----|--------|-----------|
+| **P0-A** Determinismo numérico | ✅ | [EDCS](../08-engineering/deterministic-computing-standard.md) + ADR-0006 |
+| **P0-B** Contratos versionados/congelados | ✅ | [Core Contracts v1.0](../06-api/core-contracts-v1.0.md) (C1–C9) |
+| **P0-C** Concurrencia de riesgo | ✅ | [Risk Budget Concurrency](../08-engineering/risk-budget-concurrency-standard.md) + ADR-0007 |
+| **P0-D** Provenance (`dataVersion`/`configHash`) | ✅ | Core Contracts §0.4 (Event Envelope) + C7 |
+| **P0-E** Ownership posición / doble conteo | ✅ | [ADR-0008](../adr/0008-position-ownership-and-scoring-boundaries.md) |
+| **P0-F** Dependencias colgantes | ✅ | [Core Contract Stubs v1.0](../06-api/core-contract-stubs-v1.0.md) (C10–C13) |
+
+### Estado actualizado
+> ## 🟢 CORE ARCHITECTURE **v1.0** — *design-complete*
+
+- **Freeze-readiness (diseño): 72 → 95/100.** Los P0 eran de **diseño** y están
+  resueltos; las fronteras (C1–C13) están congeladas y son construibles.
+- **Lo que resta ya NO es de documento, sino de implementación** (gates de código):
+  contract tests producer+consumer verdes, conformance suite EDCS cross-platform/
+  language, y batería de concurrencia T1–T15. Al pasar esos gates, los estándares
+  promocionan de `frozen-candidate` (🟡) a `frozen` (🟢).
+- **P1 pendientes (no bloquean el freeze):** HA de MDE/Risk, seguridad threadeada,
+  observabilidad homogénea, latency budget y calibración empírica (ENG-004).
+
+**Conclusión:** la arquitectura queda **congelada y lista para construir**. El
+desarrollo puede comenzar contra los contratos congelados.
