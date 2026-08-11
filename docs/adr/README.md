@@ -18,6 +18,7 @@ Formato basado en Michael Nygard. Plantilla en [`template.md`](template.md).
 | [0005](0005-database-per-module.md) | Base de datos (esquema) por módulo | Accepted |
 | [0006](0006-deterministic-computing.md) | Computación determinista (decimal-first, EDCS) | Accepted |
 | [0007](0007-risk-budget-concurrency.md) | Concurrencia del presupuesto de riesgo (reserva + CAS) | Accepted |
+| [0008](0008-position-ownership-and-scoring-boundaries.md) | Frontera de gestión de posición (Trading↔Execution) y separación Context/Entry Score | Accepted |
 
 ## Cuándo escribir un ADR
 

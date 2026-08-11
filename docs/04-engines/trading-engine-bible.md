@@ -659,6 +659,15 @@ El motor **no** opera por reglas binarias aisladas: agrega la evidencia en un
 total **supera un umbral configurable** `entry_score_threshold` (⚙️ def. 70) **y**
 se cumplen todos los **vetos duros** (§35/§37).
 
+> **Frontera Context/Entry (ADR-0008, cierra P0-E).** El **Entry Score puntúa solo
+> la confluencia del setup**. El **contexto se evalúa una única vez en el Market
+> Context Engine** (ENG-011): es un **gate** + **modulador de riesgo** (ENG-005 §19),
+> **no** un factor del Entry Score. Por eso los factores de contexto puro —**killzone/
+> sesión** y **régimen ATR/spread**— **se retiran** del Entry Score (evitando el doble
+> conteo); el **HTF bias alignment se consume del `MarketContext`** (no se re-detecta).
+> La tabla siguiente conserva la numeración histórica; los **pesos renormalizados** (sin
+> killzone ni ATR/spread) están en **ADR-0008 §Parte B** y se **calibran en ENG-004**.
+
 ### 26.1 Principios del scoring
 - **Ponderado y configurable:** cada factor tiene un peso (`weight_*`) editable por
   perfil/estrategia. La suma de pesos máximos = 100.
@@ -749,6 +758,13 @@ bias, la secuencia LTF es:
 ---
 
 # 28. Gestión de salida (Exit Management)
+
+> **Naturaleza de §28–§33 (ADR-0008, cierra P0-E): especificación de *política*, no de
+> ejecución.** El Trading Engine **propone** la gestión (SL/TP/BE/trailing/parciales/
+> cierres) vía el `managementPlan` del TradeIntent y señales posteriores; **el
+> Execution Engine (OMS, ENG-006) es la única fuente de verdad del estado de la
+> posición y el único ejecutor** de esa gestión. El Trading Engine **nunca** muta el
+> estado de la posición directamente.
 
 La salida es un **sistema**, no un único TP. Combina objetivos de liquidez,
 múltiplos de riesgo (R) y gestión dinámica.

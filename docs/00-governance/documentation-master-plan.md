@@ -220,6 +220,7 @@ para producir código con calidad y operarlo.*
 | ENGX-000 | **Coding Standards** | Clean Code, SOLID, patrones, manejo de errores | Eng Lead | ARC-001 | 🟨 | `architecture/06` |
 | ENGX-EDCS | **Deterministic Computing Standard (EDCS)** | Determinismo numérico: decimal-first, cuantización, redondeo, hashing/serialización canónica, reproducibilidad cross-platform/language/version + checklist obligatorio | CTO | ARC-004 | 🟡 → `08-engineering/deterministic-computing-standard.md` (cierra P0-A; ADR-0006) |
 | ENGX-RISKCONC | **Risk Budget Concurrency Standard** | Presupuesto de riesgo reservable: reserva en 2 fases sobre agregado por cuenta + CAS/optimistic, event sourcing, TTL/expiración, recovery, observabilidad + checklist obligatorio | Risk | ENG-005 | 🟡 → `08-engineering/risk-budget-concurrency-standard.md` (cierra P0-C; ADR-0007) |
+| ADR-0008 | **Position Ownership & Scoring Boundaries** | Frontera Trading (política) ↔ Execution (estado/ejecución) de la posición; Context Score = gate+modulador, Entry Score = solo confluencia (fin del doble conteo) | CTO | ENG-001, ENG-006, ENG-011 | 🟢 → `adr/0008-position-ownership-and-scoring-boundaries.md` (cierra P0-E) |
 | ENGX-001 | **Naming Convention** | Nomenclatura por lenguaje y capa | Eng Lead | ENGX-000 | 🟩 | `architecture/07` |
 | ENGX-002 | **Git Workflow** | Trunk-based, commits, PRs, protección de ramas | Eng Lead | GOV-004 | 🟨 | `architecture/08` |
 | ENGX-003 | **Release Workflow & Versioning** | SemVer, changelog, releases por servicio | Eng Lead | ENGX-002 | ⬜ | — |

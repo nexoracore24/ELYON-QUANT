@@ -71,6 +71,12 @@ factores de contexto que hoy aparecen en el Entry Score (killzone, ATR, spread,
 noticias) pasan a **originarse en el MCE** y se consumen aguas abajo (fuente única
 de verdad del contexto).
 
+> **Frontera formalizada (ADR-0008, cierra P0-E).** El Context Score es **gate +
+> modulador de riesgo** (ENG-005 §19), **no** un factor del Entry Score: killzone y
+> régimen ATR/spread **se retiran** del Entry Score (fin del doble conteo) y el HTF
+> bias del Entry Score se **consume** de este `MarketContext`. Pesos renormalizados
+> del Entry Score en ADR-0008 §Parte B (a calibrar en ENG-004).
+
 ---
 
 ## 1. Misión y principios
