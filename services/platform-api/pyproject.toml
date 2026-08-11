@@ -1,0 +1,17 @@
+[project]
+name = "elyon-platform-api"
+version = "0.1.0"
+description = "ELYON QUANT platform API - modular monolith"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
