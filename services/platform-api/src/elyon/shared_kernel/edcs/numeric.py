@@ -23,6 +23,7 @@ DEFAULT_ROUNDING: Final[str] = ROUND_HALF_EVEN
 RATIO_SCALE: Final[int] = 6
 
 ZERO: Final[Decimal] = Decimal(0)
+ONE: Final[Decimal] = Decimal(1)
 
 
 class DeterminismError(ValueError):

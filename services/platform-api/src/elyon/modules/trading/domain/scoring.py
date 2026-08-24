@@ -69,6 +69,10 @@ class Veto(str, Enum):
     KILL_SWITCH = "KILL_SWITCH"
     STALE_DATA = "STALE_DATA"
     BIAS_CONFLICT = "BIAS_CONFLICT"
+    # Two live strategies wanting opposite sides. Netting them out would put on
+    # a small position in whichever was louder and hide that the engine had no
+    # read at all; standing down says so.
+    STRATEGY_CONFLICT = "STRATEGY_CONFLICT"
 
 
 class Conviction(str, Enum):

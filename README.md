@@ -8,7 +8,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > Estado del proyecto: **Núcleo en construcción.**
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
-> pilares, riesgo y scoring, con **205 tests** verdes.
+> pilares, el catálogo ICT combinable, riesgo y scoring, con **383 tests**
+> verdes.
 >
 > ```bash
 > make test    # suite completa
@@ -68,6 +69,82 @@ sería confundir la manipulación con la señal.
 
 ---
 
+## Estrategias
+
+Además del modelo de la casa, ELYON QUANT trae un **catálogo de estrategias ICT
+y Smart Money** que se pueden activar, desactivar y **combinar** individualmente.
+
+| Estrategia | Familia | Tesis | Tier declarado | Tier real |
+|---|---|---|---|---|
+| **Six Pillars** | Liquidity raid | Los seis pilares alineados. El modelo de la casa | 🟢 HIGH | ⚪ |
+| **ICT 2022 Model** | Structure shift | Sweep → MSS → entrada en el FVG que dejó | 🟢 HIGH | ⚪ |
+| **Unicorn Model** | Block mitigation | Breaker y FVG ocupando los mismos precios | 🟢 HIGH | ⚪ |
+| **SMT Divergence** | Correlation | Instrumentos correlacionados que discrepan en un extremo | 🟢 HIGH | ⚪ |
+| **Silver Bullet** | Session timing | Una hora, un FVG, en dirección del sesgo | 🟡 MEDIUM | ⚪ |
+| **Turtle Soup** | Liquidity raid | Ruptura falsa de un extremo antiguo que cierra dentro | 🟡 MEDIUM | ⚪ |
+| **Judas Swing** | Session timing | El movimiento de apertura es mentira | 🟡 MEDIUM | ⚪ |
+| **Power of 3 (AMD)** | Session timing | Acumulación → manipulación → distribución | 🟡 MEDIUM | ⚪ |
+| **Breaker Retest** | Block mitigation | El nivel que no aguantó es el que ahora rechaza | 🟡 MEDIUM | ⚪ |
+| **Equal Level Raid** | Liquidity raid | Máximos/mínimos iguales son un anuncio | 🟡 MEDIUM | ⚪ |
+| **Asian Range Sweep** | Session timing | Londres barre un lado del rango asiático | 🟡 MEDIUM | ⚪ |
+| **Optimal Trade Entry** | Premium/discount | Retroceso a 0.618–0.786. Nunca sola | 🔴 LOW | ⚪ |
+| **Balanced Price Range** | Imbalance | Dos FVG opuestos solapados | 🔴 LOW | ⚪ |
+
+```python
+registry = (
+    StrategyRegistry.default()               # casa en vivo, resto observando
+    .live(StrategyId.ICT_2022_MODEL)         # activar
+    .shadow(StrategyId.ICT_SILVER_BULLET)    # observar sin operar
+    .off(StrategyId.BALANCED_PRICE_RANGE)    # desactivar
+)
+verdict = evaluate(context, registry)
+```
+
+### Por qué la columna «tier real» está en ⚪
+
+**Un tier se gana, nunca se declara.** El tier declarado es la hipótesis del
+autor; el que el motor obedece sale de una calibración real:
+
+```python
+Calibration(sample_size=180, wins=92, expectancy_r=dec("0.42"))  # → 🟢 HIGH
+```
+
+Tres reglas que salen de ahí, y que están cubiertas por tests:
+
+- **Muestra < 30 → ⚪ UNPROVEN**, por bueno que se vea. Doce operaciones son una
+  anécdota, no evidencia.
+- **90% de aciertos con expectancy negativa → 🔴 LOW.** Ganar a menudo y ganar
+  dinero son afirmaciones distintas, y solo la segunda paga.
+- **⚪ UNPROVEN nunca abre una operación sola.** Solo puede corroborar a otra.
+  Esa regla es lo que hace seguro publicar trece estrategias a la vez.
+
+Por eso el catálogo se envía con todo en ⚪ y con **shadow mode**: la estrategia
+se evalúa y se registra en cada vela pero no toca la operación. Es la única
+salida al círculo vicioso de «necesita datos para operar, necesita operar para
+tener datos».
+
+### Cómo se combinan
+
+- **La confluencia cuenta familias, no estrategias.** Cinco estrategias leyendo
+  el mismo FVG son una evidencia vista cinco veces. Añadir una estrategia nunca
+  puede, por sí solo, hacer que un setup existente parezca mejor.
+- **El desacuerdo es un veto, no un promedio.** Si dos estrategias en vivo
+  quieren lados opuestos, promediarlas pondría una posición pequeña en la que
+  gritara más y ocultaría que el motor no tenía lectura. Se planta y lo dice.
+  (Configurable: `VETO` por defecto, `STRONGEST_WINS`, `MAJORITY`.)
+- **El tier decide quién actúa solo:** 🟢 sola · 🟡 con 1 familia · 🔴 con 2 ·
+  ⚪ nunca.
+- **La confluencia satura.** El bonus por familias de acuerdo es decreciente y
+  tiene tope: un gráfico concurrido no es una certeza.
+- **El hash del registro viaja con cada decisión**, así que un replay puede
+  probar qué estrategias estaban activas cuando se tomó la operación.
+
+Las *killzones* se definen en **hora de Nueva York**, no en UTC: la de Londres
+cae a las 07:00 UTC en invierno y a las 06:00 en verano, y un sistema que
+fija UTC está equivocado la mitad del año.
+
+---
+
 ## Estado del código
 
 | Módulo | Qué hace | Estado |
@@ -75,7 +152,7 @@ sería confundir la manipulación con la señal.
 | `shared_kernel/edcs` | Decimal canónico, cuantización, JSON canónico, hashing, IDs estables | ✅ |
 | `market_data` | Ticks → velas (FORMING/CONFIRMED), watermark, ATR, Efficiency Ratio | ✅ |
 | `smart_money` | Displacement, swings, estructura, BOS/CHoCH/MSS, liquidez, sweeps, FVG, order blocks, premium/discount, OTE, Fibonacci | ✅ |
-| `strategy` | **Los seis pilares** como objeto de primera clase: localización, geometría del setup, puente al scoring | ✅ |
+| `strategy` | **Los seis pilares** + catálogo ICT (13 estrategias), tiers por calibración, activación tri-estado, playbook de combinación, killzones | ✅ |
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
 | `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
@@ -85,8 +162,10 @@ sería confundir la manipulación con la señal.
 **Garantías demostradas por tests, no prometidas:** determinismo bit a bit ·
 no-repaint (una vela confirmada nunca muta) · orden de llegada irrelevante ·
 sin look-ahead (leer un prefijo nunca ve las velas que vienen) · un veto vence a
-cualquier score · el stop nunca cae del lado equivocado · el riesgo tiene la
-última palabra · toda decisión se explica desde su propio registro.
+cualquier score · el stop nunca cae del lado equivocado · una estrategia sin
+calibrar nunca opera sola · añadir una estrategia nunca mejora un setup
+existente · el riesgo tiene la última palabra · toda decisión se explica desde
+su propio registro.
 
 ---
 

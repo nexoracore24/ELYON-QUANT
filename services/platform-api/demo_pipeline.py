@@ -30,8 +30,16 @@ from elyon.modules.risk.domain import (
 )
 from elyon.modules.smart_money.domain.structure import Direction
 from elyon.modules.strategy.domain import (
+    Calibration,
+    ConflictPolicy,
+    PlaybookConfig,
+    StrategyId,
+    StrategyRegistry,
+    build_context,
+    evaluate,
     locate_six_pillars,
     pillar_summary,
+    profile,
     score_setup,
 )
 from elyon.modules.trading.domain import (
@@ -163,8 +171,20 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     print(f"\n  {setup.pillars_found}/6 aligned  ·  side: "
           f"{setup.direction.name if setup.direction else 'none'}")
 
-    # 3. What the pillars imply -------------------------------------------
-    rule("3. Setup geometry")
+    # 3. The strategy catalog ---------------------------------------------
+    # Every active strategy reads the same context and reports independently.
+    # Nothing here is calibrated yet, so nothing may open a trade alone -- the
+    # gate says so rather than pretending.
+    rule("3. Strategy playbook")
+    ctx = build_context(series, atr, symbol=SYMBOL, swing_grade=1)
+    registry = StrategyRegistry.default()
+    verdict = evaluate(ctx, registry)
+    print("  " + verdict.summary().replace("\n", "\n  "))
+    print(f"\n  gate: {verdict.gate.value}")
+    print(f"  {verdict.reason}")
+
+    # 4. What the pillars imply -------------------------------------------
+    rule("4. Setup geometry")
     if setup.displacement is not None:
         d = setup.displacement
         print(f"  displacement: {d.direction.name} {d.move} "
@@ -182,8 +202,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         print(f"  entry zone (block ∩ OTE): [{low}, {high}]")
     print(f"  invalidation: {setup.invalidation}   target: {setup.target}")
 
-    # 4. Scoring ----------------------------------------------------------
-    rule("4. Scoring")
+    # 5. Scoring ----------------------------------------------------------
+    rule("5. Scoring")
     score = score_setup(setup, vetoes=[
         (Veto.NEWS_WINDOW, False, "no events in window"),
         (Veto.SPREAD_BLOWOUT, False, "spread within profile"),
@@ -195,8 +215,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
               f" {factor.condition}")
     print(f"  {'':<24} {score.total:>3}/100   threshold {score.threshold}")
 
-    # 5. Risk -------------------------------------------------------------
-    rule("5. Risk")
+    # 6. Risk -------------------------------------------------------------
+    rule("6. Risk")
     budget = RiskBudget(
         "demo-account",
         {Dimension.DAILY_LOSS: dec("300"), Dimension.TOTAL_OPEN_RISK: dec("200")},
@@ -243,8 +263,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         if sizing.reward_risk is not None:
             print(f"  reward:risk was {sizing.reward_risk:.2f}")
 
-    # 6. Decision ---------------------------------------------------------
-    rule("6. Decision")
+    # 7. Decision ---------------------------------------------------------
+    rule("7. Decision")
     tradeable = score.tradeable and sizing.approved
     # Risk only gets the blame when the setup actually reached it. Attributing a
     # 19/100 to the R:R filter would hide the real reason: there was no setup.
@@ -279,6 +299,87 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     print()
     print("  " + explanation.narrative.replace(". ", ".\n  "))
 
+def strategy_catalog() -> None:
+    """The catalog, and what switching strategies on actually changes."""
+    series = build_candles(bullish_setup())
+    provider = AtrProvider(period=5, output_scale=5)
+    for candle in series:
+        provider.update(candle)
+    atr = provider.value or dec("0.0010")
+    ctx = build_context(series, atr, symbol=SYMBOL, swing_grade=1)
+
+    print("\n" + "=" * 68)
+    print("STRATEGY CATALOG")
+    print("=" * 68)
+    print("  ● live   ◐ shadow   ○ off")
+    print("  🟢 high   🟡 medium   🔴 low   ⚪ unproven\n")
+    print("  " + StrategyRegistry.default().summary().replace("\n", "\n  "))
+
+    print("\n" + "-" * 68)
+    print("Every tier above is ⚪ UNPROVEN, and that is the point: the catalog")
+    print("ships with hypotheses, not blessings. A tier is earned by a")
+    print("calibration run, never by the confidence of whoever wrote it.")
+    print("-" * 68)
+
+    # A. Nothing calibrated: the house model fires and is still refused.
+    rule("A. Default — house model live, nothing calibrated")
+    verdict = evaluate(ctx, StrategyRegistry.default())
+    print(f"  fired: {[s.strategy.value for s in verdict.fired]}")
+    print(f"  gate:  {verdict.gate.value}")
+    print(f"  {verdict.reason}")
+
+    # B. Evidence arrives. The same bars, the same signal, a different verdict.
+    rule("B. Same bars, after calibration")
+    evidence = PlaybookConfig(calibrations={
+        StrategyId.SIX_PILLARS: Calibration(
+            180, 92, dec("0.42"), dataset="eurusd-m1-2024"
+        ),
+    })
+    tier = evidence.tier_of(StrategyId.SIX_PILLARS)
+    print(f"  SIX_PILLARS: 180 trades, 92 wins, expectancy 0.42R "
+          f"→ {tier.badge} {tier.value}")
+    verdict = evaluate(ctx, StrategyRegistry.default(), config=evidence)
+    print(f"  gate:  {verdict.gate.value}")
+    print(f"  {verdict.reason}")
+    print(f"  confidence: {verdict.confidence}")
+
+    # C. Winning often is not the same as making money.
+    rule("C. A strategy that wins 90% of the time and still loses")
+    steamroller = PlaybookConfig(calibrations={
+        StrategyId.SIX_PILLARS: Calibration(
+            200, 180, dec("-0.30"), dataset="eurusd-m1-2024"
+        ),
+    })
+    tier = steamroller.tier_of(StrategyId.SIX_PILLARS)
+    print(f"  SIX_PILLARS: 200 trades, 180 wins (90%), expectancy -0.30R "
+          f"→ {tier.badge} {tier.value}")
+    verdict = evaluate(ctx, StrategyRegistry.default(), config=steamroller)
+    print(f"  gate:  {verdict.gate.value}")
+    print(f"  {verdict.reason}")
+
+    # D. Two live strategies wanting opposite sides.
+    rule("D. When the engine disagrees with itself")
+    print("  Netting two opposing signals would put on a small position in")
+    print("  whichever was louder and hide that there was no read at all.")
+    print(f"  Default policy: {ConflictPolicy.VETO.value} — the engine stands down.")
+
+    # E. Turning strategies on and off.
+    rule("E. Toggling — each switch changes the provenance hash")
+    for label, reg in [
+        ("default            ", StrategyRegistry.default()),
+        ("only ICT 2022      ", StrategyRegistry.default().only(
+            StrategyId.ICT_2022_MODEL)),
+        ("+ Turtle Soup live ", StrategyRegistry.default().live(
+            StrategyId.ICT_TURTLE_SOUP)),
+        ("everything off     ", StrategyRegistry.all_off()),
+    ]:
+        print(f"  {label} live={len(reg.live_ids):<2} "
+              f"shadow={len(reg.shadow_ids):<2} hash={reg.config_hash[:16]}…")
+
+    print("\n  A replay can prove which strategies were switched on when a")
+    print("  trade was taken, because the hash travels with the decision.")
+
+
 def main() -> None:
     print("=" * 68)
     print("ELYON QUANT — decision pipeline")
@@ -286,10 +387,11 @@ def main() -> None:
 
     run("A+ setup (uptrend, sweep, displacement)", bullish_setup())
     run("Choppy market (no edge)", choppy_market())
+    strategy_catalog()
 
     print("\n" + "=" * 68)
-    print("Both decisions are reproducible: the same ticks and the same config")
-    print("yield the same candle hashes, the same score and the same id.")
+    print("Every decision is reproducible: the same ticks, the same config and")
+    print("the same active strategies yield the same hashes, score and id.")
     print("=" * 68)
 
 
