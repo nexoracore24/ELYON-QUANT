@@ -54,6 +54,20 @@ class DecisionRecord:
     score: Score
     provenance: Provenance
     detected: Mapping[str, str] = field(default_factory=dict)
+    rejection_reason: str | None = None
+    """Why the trade was refused *after* scoring -- typically a risk rule.
+
+    A setup can clear the threshold and still not trade. Without this the
+    record could only report the score's verdict, which would read as if the
+    engine had entered.
+    """
+
+    @property
+    def final_reason(self) -> str:
+        """The reason that actually decided it, risk included."""
+        if self.action == "no_trade" and self.rejection_reason:
+            return self.rejection_reason
+        return self.score.primary_reason
 
     @property
     def decision_id(self) -> str:
@@ -79,7 +93,7 @@ class DecisionRecord:
             "action": self.action,
             "score": self.score.total,
             "threshold": self.score.threshold,
-            "primaryReason": self.score.primary_reason,
+            "primaryReason": self.final_reason,
             "factors": [
                 {
                     "factor": f.factor.value,
@@ -149,7 +163,7 @@ def explain(record: DecisionRecord) -> Explanation:
         weights=tuple((f.factor.value, f.weight, f.awarded) for f in score.factors),
         rules_fired=tuple(f.factor.value for f in score.confirmed),
         vetoes_blocked=blocked,
-        primary_reason=score.primary_reason,
+        primary_reason=record.final_reason,
         narrative=_narrate(record),
     )
 
@@ -189,12 +203,21 @@ def _narrate(record: DecisionRecord) -> str:
         )
         parts.append(f"Blocked by: {blocked}.")
 
-    verdict = {
-        Conviction.HIGH: "Entered with high conviction.",
-        Conviction.STANDARD: "Entered.",
-        Conviction.WATCHLIST: "Not traded; kept on the watchlist.",
-        Conviction.DISCARD: "Not traded.",
-    }[score.conviction]
-    parts.append(f"{verdict} Reason: {score.primary_reason}.")
+    # The verdict follows the action actually taken, not the score alone. A
+    # setup can clear the threshold and still not trade -- risk has the last
+    # word -- and an explanation that claimed otherwise would be lying.
+    if record.action == "no_trade":
+        verdict = (
+            "Not traded; kept on the watchlist."
+            if score.conviction is Conviction.WATCHLIST
+            else "Not traded."
+        )
+        if score.tradeable:
+            verdict = "Not traded despite clearing the threshold."
+    elif score.conviction is Conviction.HIGH:
+        verdict = "Entered with high conviction."
+    else:
+        verdict = "Entered."
+    parts.append(f"{verdict} Reason: {record.final_reason}.")
 
     return " ".join(parts)

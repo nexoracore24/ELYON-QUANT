@@ -281,3 +281,48 @@ class TestExplanation:
         assert exp.action == "no_trade"
         assert exp.discarded
         assert "not traded" in exp.narrative.lower()
+
+
+class TestRiskHasTheLastWord:
+    """A setup can clear the threshold and still not trade.
+
+    The explanation must say so. Claiming an entry that never happened would
+    be exactly the kind of drift the design exists to prevent.
+    """
+
+    def _rejected_by_risk(self) -> DecisionRecord:
+        return DecisionRecord(
+            symbol="EURUSD",
+            bar_close_time_ns=1690000900000000000,
+            side="LONG",
+            action="no_trade",
+            score=perfect_setup().build(),   # a full 100
+            provenance=PROV,
+            rejection_reason="risk:rr_below_minimum",
+        )
+
+    def test_the_narrative_does_not_claim_an_entry_that_never_happened(self):
+        exp = explain(self._rejected_by_risk())
+        assert "not traded" in exp.narrative.lower()
+        assert "entered." not in exp.narrative.lower()
+
+    def test_the_narrative_acknowledges_the_score_was_good(self):
+        exp = explain(self._rejected_by_risk())
+        assert "despite clearing the threshold" in exp.narrative.lower()
+
+    def test_the_reason_names_the_rule_that_actually_stopped_it(self):
+        exp = explain(self._rejected_by_risk())
+        assert exp.primary_reason == "risk:rr_below_minimum"
+        assert "risk:rr_below_minimum" in exp.narrative
+
+    def test_the_record_reports_the_risk_reason_not_the_score_verdict(self):
+        payload = self._rejected_by_risk().to_canonical_dict()
+        assert payload["primaryReason"] == "risk:rr_below_minimum"
+        assert payload["score"] == 100  # the score itself is unchanged
+
+    def test_without_a_rejection_reason_the_score_verdict_stands(self):
+        record = DecisionRecord(
+            symbol="EURUSD", bar_close_time_ns=1, side="LONG",
+            action="enter_long", score=perfect_setup().build(), provenance=PROV,
+        )
+        assert record.final_reason == "entered"
