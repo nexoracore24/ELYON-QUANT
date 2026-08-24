@@ -380,6 +380,57 @@ def strategy_catalog() -> None:
     print("  trade was taken, because the hash travels with the decision.")
 
 
+def backtest_loop() -> None:
+    """The loop closing: unproven → measured → allowed to trade."""
+    from elyon.modules.backtesting.domain import (
+        DEFAULT_COSTS,
+        GeneratorConfig,
+        Sample,
+        SimulationConfig,
+        calibration_from,
+        generate,
+        report_from,
+        research_config,
+        simulate,
+        tier_of,
+    )
+
+    print("\n" + "=" * 68)
+    print("BACKTEST — earning a tier")
+    print("=" * 68)
+    print("  Synthetic data with a known follow-through rate. This measures the")
+    print("  simulator, not the strategy: running a model on data generated to")
+    print("  contain its setups proves nothing about the model.")
+
+    market = generate(GeneratorConfig(cycles=60))
+    config = SimulationConfig(max_bars_in_trade=25, costs=DEFAULT_COSTS)
+    registry = StrategyRegistry.all_off().live(StrategyId.SIX_PILLARS)
+
+    trades = simulate(
+        market, registry, symbol=SYMBOL, config=config,
+        playbook=research_config((StrategyId.SIX_PILLARS,)),
+    )
+    report = report_from(
+        trades,
+        strategy=StrategyId.SIX_PILLARS,
+        dataset="synthetic-m1",
+        sample=Sample.IN_SAMPLE,
+        data_hash=market[0].data_hash,
+        config_hash=config.config_hash,
+        registry_hash=registry.config_hash,
+    )
+
+    rule("Result")
+    print("  " + report.summary().replace("\n", "\n  "))
+
+    rule("Certification")
+    print(f"  this run would award: {tier_of(report).badge} {tier_of(report).value}")
+    try:
+        calibration_from(report)
+    except Exception as exc:
+        print(f"  but it is refused:\n    {exc}")
+
+
 def main() -> None:
     print("=" * 68)
     print("ELYON QUANT — decision pipeline")
@@ -388,6 +439,7 @@ def main() -> None:
     run("A+ setup (uptrend, sweep, displacement)", bullish_setup())
     run("Choppy market (no edge)", choppy_market())
     strategy_catalog()
+    backtest_loop()
 
     print("\n" + "=" * 68)
     print("Every decision is reproducible: the same ticks, the same config and")

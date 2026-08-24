@@ -8,8 +8,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > Estado del proyecto: **Núcleo en construcción.**
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
-> pilares, el catálogo ICT combinable, riesgo y scoring, con **383 tests**
-> verdes.
+> pilares, el catálogo ICT combinable, backtesting, riesgo y scoring, con
+> **455 tests** verdes.
 >
 > ```bash
 > make test    # suite completa
@@ -145,6 +145,48 @@ fija UTC está equivocado la mitad del año.
 
 ---
 
+## Backtesting: cómo se gana un tier
+
+Un backtest es una afirmación sobre lo que un sistema *habría* hecho, y hay
+cuatro formas conocidas de que esa afirmación sea falsa. El simulador rechaza
+tres **estructuralmente**:
+
+| Mentira | Cómo se impide |
+|---|---|
+| **Look-ahead** | Una estrategia solo recibe `series.window(i, lookback)`. No puede ver la vela `i+1` porque no está en el objeto que se le pasó |
+| **Optimismo intrabar** | Si una vela contiene stop *y* objetivo, el OHLC no dice cuál se tocó antes. Se asume el **stop**, siempre, y sin opción de desactivarlo |
+| **Fills sin coste** | Spread y slippage se aplican en cada fill y **siempre en contra**: el comprador llena más caro, el vendedor más barato |
+
+La cuarta —medir sobre los datos con los que diseñaste la estrategia— no se
+puede detectar, así que hay que **declararla**, y certificar un `IN_SAMPLE` está
+prohibido:
+
+```
+SIX_PILLARS was measured in-sample on 'synthetic-m1'; an in-sample result
+cannot certify a tier. Hold data back and re-run, or mark the run
+OUT_OF_SAMPLE only when it genuinely was.
+```
+
+El reporte incluye **`ex-best trade`**: la expectancy quitando la mejor
+operación. Es la comprobación más útil que hay — si el edge desaparece al
+quitar una sola operación, no es un edge, es un *outlier*, y los outliers no se
+repiten a demanda. El resumen lo marca con `⚠ carried by one trade`.
+
+```python
+trades = simulate(series, registry, config=SimulationConfig(), playbook=research_config((HOUSE,)))
+report = report_from(trades, sample=Sample.OUT_OF_SAMPLE, ...)
+calibration = calibration_from(report)      # ← lo único que mueve un tier
+config = PlaybookConfig(calibrations={StrategyId.SIX_PILLARS: calibration})
+```
+
+Otras dos decisiones que importan: un **R:R sin techo es una alarma, no un
+premio** (un objetivo a 20R es un nivel que el precio no alcanza, así que la
+operación siempre sale por tiempo y se contabiliza la deriva que hubiera), y
+las operaciones que quedan abiertas al acabar los datos **se reportan, no se
+descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
+
+---
+
 ## Estado del código
 
 | Módulo | Qué hace | Estado |
@@ -157,14 +199,15 @@ fija UTC está equivocado la mitad del año.
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
 | `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
 | `market_context` | Gate de contexto, Market DNA | ⬜ especificado |
-| `backtesting` | Reproducibilidad y calibración | ⬜ especificado |
+| `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
 
 **Garantías demostradas por tests, no prometidas:** determinismo bit a bit ·
 no-repaint (una vela confirmada nunca muta) · orden de llegada irrelevante ·
 sin look-ahead (leer un prefijo nunca ve las velas que vienen) · un veto vence a
 cualquier score · el stop nunca cae del lado equivocado · una estrategia sin
 calibrar nunca opera sola · añadir una estrategia nunca mejora un setup
-existente · el riesgo tiene la última palabra · toda decisión se explica desde
+existente · truncar el futuro no cambia el pasado · un backtest in-sample no
+certifica nada · el riesgo tiene la última palabra · toda decisión se explica desde
 su propio registro.
 
 ---

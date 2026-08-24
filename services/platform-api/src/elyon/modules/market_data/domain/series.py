@@ -49,6 +49,20 @@ class CandleSeries:
         """The series as it stood at ``index`` -- the guard against look-ahead."""
         return CandleSeries(self.candles[: index + 1])
 
+    def window(self, index: int, bars: int) -> CandleSeries:
+        """The last ``bars`` candles as they stood at ``index``.
+
+        The look-ahead guarantee of :meth:`upto` with a bounded history. Reading
+        every bar ever recorded is not just slow -- it is wrong: a swing from
+        eight months ago is not structure the market is trading against today.
+        A finite window is both faster and closer to what a trader actually
+        looks at.
+        """
+        if bars < 1:
+            raise DeterminismError(f"window needs at least one bar, got {bars}")
+        start = max(0, index + 1 - bars)
+        return CandleSeries(self.candles[start : index + 1])
+
     def highs(self) -> list[Decimal]:
         return [c.high for c in self.candles]
 
