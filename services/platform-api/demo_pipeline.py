@@ -28,6 +28,12 @@ from elyon.modules.risk.domain import (
     SizingRequest,
     size_position,
 )
+from elyon.modules.market_context.domain import (
+    ContextConfig,
+    learn_dna,
+    profile_for,
+    read_context,
+)
 from elyon.modules.smart_money.domain.structure import Direction
 from elyon.modules.strategy.domain import (
     Calibration,
@@ -54,6 +60,11 @@ SYMBOL = "EURUSD"
 TF = Timeframe.M1
 SECOND = 1_000_000_000
 
+# 2026-01-15 09:00 New York. Epoch 0 would be 19:00 NY -- outside every
+# killzone -- so the session factor would fail for a reason that has nothing to
+# do with the price action being demonstrated.
+SESSION_BASE_NS = 1768485600_000_000_000
+
 
 def candle_ticks(minute: int, o: str, h: str, l: str, c: str) -> list[Tick]:
     """Emit ticks that assemble into exactly this OHLC bar.
@@ -67,7 +78,7 @@ def candle_ticks(minute: int, o: str, h: str, l: str, c: str) -> list[Tick]:
     else:
         route = [o, l, h, c]      # dip first, then recover
     half = dec("0.00005")
-    base = minute * 60 * SECOND
+    base = SESSION_BASE_NS + minute * 60 * SECOND
     return [
         Tick(
             symbol=SYMBOL,
@@ -98,6 +109,16 @@ def bullish_setup() -> list[Tick]:
     reversal, price back in the block and still in discount.
     """
     return stream([
+        # A trend already in place: the context engine needs to see structure
+        # before it will let anything scan, and a real A+ setup never appears
+        # out of nowhere.
+        ("1.0910", "1.0930", "1.0908", "1.0926"),
+        ("1.0926", "1.0929", "1.0902", "1.0922"),
+        ("1.0922", "1.0958", "1.0920", "1.0954"),
+        ("1.0954", "1.0957", "1.0930", "1.0950"),
+        ("1.0950", "1.0986", "1.0948", "1.0982"),
+        ("1.0982", "1.0985", "1.0958", "1.0978"),
+        ("1.0978", "1.1014", "1.0976", "1.1010"),
         ("1.1010", "1.1030", "1.1008", "1.1025"),   # 0 push
         ("1.1025", "1.1028", "1.0995", "1.1020"),   # 1 pullback -> swing low
         ("1.1020", "1.1060", "1.1018", "1.1055"),   # 2 push -> swing high
@@ -161,21 +182,44 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     atr = atr_provider.value or dec("0.0010")
     print(f"  ATR(5): {atr}")
 
-    # 2. The six pillars ---------------------------------------------------
+    # 2. Context gate ------------------------------------------------------
+    # The first engine in the pipeline. Before a single order block is looked
+    # for, this decides whether the market is worth looking in at all.
+    rule("2. Context gate")
+    # These synthetic bars move far faster than real EURUSD -- against the
+    # reference profile they read as 4.4x normal volatility and the gate vetoes
+    # them outright, correctly. Learning the profile from the feed itself is
+    # what you would do with any new instrument: it teaches the engine what
+    # normal looks like *here* rather than assuming EURUSD's normal.
+    dna = learn_dna(series, profile_for(SYMBOL), atr_period=5)
+    market_context = read_context(
+        series, atr, dna, config=ContextConfig(min_bars=8)
+    )
+    print("  " + market_context.summary().replace("\n", "\n  "))
+    print(f"\n  {dna.symbol} DNA {'✓ calibrated' if dna.is_calibrated else '⚠ reference'}"
+          f"  ·  {market_context.regime.detail}")
+    print(f"  → {market_context.gate_reason}")
+
+    if not market_context.should_scan:
+        print("\n  The Smart Money engine does not run. No entry is scored.")
+        print("  This is a decision, and it is recorded like any other.")
+        return
+
+    # 3. The six pillars ---------------------------------------------------
     # One call, one object: the strategy locates all six and reports on each,
     # whether it stands or not.
     setup = locate_six_pillars(series, atr, symbol=SYMBOL, swing_grade=1)
 
-    rule("2. The six pillars")
+    rule("3. The six pillars")
     print("  " + pillar_summary(setup).replace("\n", "\n  "))
     print(f"\n  {setup.pillars_found}/6 aligned  ·  side: "
           f"{setup.direction.name if setup.direction else 'none'}")
 
-    # 3. The strategy catalog ---------------------------------------------
+    # 4. The strategy catalog ---------------------------------------------
     # Every active strategy reads the same context and reports independently.
     # Nothing here is calibrated yet, so nothing may open a trade alone -- the
     # gate says so rather than pretending.
-    rule("3. Strategy playbook")
+    rule("4. Strategy playbook")
     ctx = build_context(series, atr, symbol=SYMBOL, swing_grade=1)
     registry = StrategyRegistry.default()
     verdict = evaluate(ctx, registry)
@@ -183,8 +227,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     print(f"\n  gate: {verdict.gate.value}")
     print(f"  {verdict.reason}")
 
-    # 4. What the pillars imply -------------------------------------------
-    rule("4. Setup geometry")
+    # 5. What the pillars imply -------------------------------------------
+    rule("5. Setup geometry")
     if setup.displacement is not None:
         d = setup.displacement
         print(f"  displacement: {d.direction.name} {d.move} "
@@ -202,8 +246,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         print(f"  entry zone (block ∩ OTE): [{low}, {high}]")
     print(f"  invalidation: {setup.invalidation}   target: {setup.target}")
 
-    # 5. Scoring ----------------------------------------------------------
-    rule("5. Scoring")
+    # 6. Scoring ----------------------------------------------------------
+    rule("6. Scoring")
     score = score_setup(setup, vetoes=[
         (Veto.NEWS_WINDOW, False, "no events in window"),
         (Veto.SPREAD_BLOWOUT, False, "spread within profile"),
@@ -215,8 +259,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
               f" {factor.condition}")
     print(f"  {'':<24} {score.total:>3}/100   threshold {score.threshold}")
 
-    # 6. Risk -------------------------------------------------------------
-    rule("6. Risk")
+    # 7. Risk -------------------------------------------------------------
+    rule("7. Risk")
     budget = RiskBudget(
         "demo-account",
         {Dimension.DAILY_LOSS: dec("300"), Dimension.TOTAL_OPEN_RISK: dec("200")},
@@ -263,8 +307,8 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         if sizing.reward_risk is not None:
             print(f"  reward:risk was {sizing.reward_risk:.2f}")
 
-    # 7. Decision ---------------------------------------------------------
-    rule("7. Decision")
+    # 8. Decision ---------------------------------------------------------
+    rule("8. Decision")
     tradeable = score.tradeable and sizing.approved
     # Risk only gets the blame when the setup actually reached it. Attributing a
     # 19/100 to the R:R filter would hide the real reason: there was no setup.

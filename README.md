@@ -8,8 +8,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > Estado del proyecto: **Núcleo en construcción.**
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
-> pilares, el catálogo ICT combinable, backtesting, riesgo y scoring, con
-> **455 tests** verdes.
+> pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
+> backtesting, riesgo y scoring, con **525 tests** verdes.
 >
 > ```bash
 > make test    # suite completa
@@ -145,6 +145,73 @@ fija UTC está equivocado la mitad del año.
 
 ---
 
+## El gate de contexto y MARKET DNA
+
+**El primer motor que se ejecuta.** Antes de buscar un solo order block, decide
+si este es un mercado en el que deberíamos siquiera estar mirando. Si el gate
+falla, el Smart Money Engine **no se ejecuta** — y *por qué no se ejecutó* queda
+registrado igual de bien que por qué se operó.
+
+```
+✓ REGIME            15/22  RANGE, ER 0.364929
+· MTF_ALIGNMENT      0/16  no directional structure (slow RANGE, fast RANGE)
+✓ MARKET_QUALITY    16/16  efficiency 0.364929, clean
+✓ VOLATILITY        12/12  NORMAL (1.1901× typical)
+✓ SESSION           12/12  NY_AM, an efficient window for EURUSD
+✓ LIQUIDITY         10/10  spread 0.00010 (1.0000× typical)
+· NEWS_CLEAR         0/8   no economic calendar connected; news risk unknown
+✓ NO_MANIPULATION    4/4   no raid pattern in progress
+                    69/100   threshold 60 → PASS
+```
+
+Dos fallos opuestos y ambos descalificantes: un mercado **muerto** no ofrece
+nada que capturar, y uno **extremo** se mueve tanto que cualquier stop sensato
+es ruido. Y el más caro de los tres: **CHURN** — movimiento sin dirección, que
+parece oportunidad y no lo es.
+
+**Un veto no es una nota baja.** Spread reventado, volatilidad ingobernable,
+feed parado: son condiciones bajo las que el número deja de significar algo, y
+fallan el gate con cualquier score.
+
+**El contexto nunca puntúa la entrada** (ADR-0008): los dos conjuntos de
+factores son disjuntos por construcción. Contar killzone en ambos sitios sería
+pagar dos veces por la misma evidencia.
+
+**El calendario que falta se ve.** Sin feed de noticias, `NEWS_CLEAR` se
+**retiene** en vez de darse por bueno — el techo alcanzable baja a 92/100. Dar
+esos 8 puntos gratis haría invisible una fuente de datos ausente.
+
+### MARKET DNA
+
+Un ATR de 0.0008 es un mercado muerto en oro y uno normal en EURUSD. Todo umbral
+se expresa en **unidades relativas al instrumento**, nunca en precios absolutos.
+
+| Activo | Clase | ATR típico | Spread (máx) | Horas eficientes |
+|---|---|---|---|---|
+| EURUSD | FX major | 0.00100 | 0.00010 (0.00040) | London · NY AM · London close |
+| GBPUSD | FX major | 0.00140 | 0.00015 (0.00060) | London · NY AM |
+| XAUUSD | Metal | 2.50 | 0.30 (1.20) | NY AM · London close |
+| NAS100 | Índice | 25.0 | 1.5 (6.0) | NY cash open |
+| US30 | Índice | 120.0 | 2.0 (10.0) | NY cash open |
+| BTCUSD | Cripto | 350.0 | 8.0 (60.0) | 24/7 |
+| ETHUSD | Cripto | 28.0 | 1.2 (9.0) | 24/7 |
+
+**Regla inviolable: el DNA adapta filtros, NUNCA reglas.** Qué *es* un BOS, qué
+*es* un order block, cómo se compone el score — idéntico en todos los activos.
+Lo que cambia por activo es cuánto vale «igual», cuánta penetración cuenta como
+barrido, qué spread se tolera. Se aplica estructuralmente: un perfil solo puede
+llevar números, y el motor los lee con `dna.override ?? engine_default`. No hay
+gancho para que un perfil aporte comportamiento.
+
+Y como con los tiers: **un perfil escrito a mano es una conjetura.** Los siete
+perfiles de referencia salen con `is_calibrated = False`, y `learn_dna()` deriva
+uno real de velas reales — usando la **mediana**, para que un solo pico de
+volatilidad no redefina lo que es normal el mes siguiente. Lo que se aprende son
+los números medibles; las horas eficientes y las sensibilidades siguen siendo
+decisiones de research y no las reescribe ningún ajuste.
+
+---
+
 ## Backtesting: cómo se gana un tier
 
 Un backtest es una afirmación sobre lo que un sistema *habría* hecho, y hay
@@ -198,7 +265,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
 | `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
-| `market_context` | Gate de contexto, Market DNA | ⬜ especificado |
+| `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
 | `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
 
 **Garantías demostradas por tests, no prometidas:** determinismo bit a bit ·
