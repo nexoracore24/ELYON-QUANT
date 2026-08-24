@@ -7,8 +7,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 > Estado del proyecto: **Núcleo en construcción.**
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
-> corre: datos de mercado, detectores Smart Money, riesgo y scoring, con **157
-> tests** verdes.
+> corre: datos de mercado, detectores Smart Money, la estrategia de los seis
+> pilares, riesgo y scoring, con **205 tests** verdes.
 >
 > ```bash
 > make test    # suite completa
@@ -21,6 +21,53 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ---
 
+## La estrategia: seis pilares
+
+ELYON QUANT opera **una sola tesis**: el precio va a buscar liquidez, la toma, y
+después viaja desde una zona institucional en la dirección de la tendencia
+superior. Seis cosas tienen que alinearse para que esa historia sea cierta:
+
+| # | Pilar | Pregunta que responde | Dónde vive |
+|---|-------|----------------------|------------|
+| 1 | **TENDENCIA** | ¿Hacia dónde va realmente el mercado? | `build_structure` |
+| 2 | **LIQUIDEZ** | ¿Dónde están las órdenes en reposo, y se las llevaron? | `build_pools`, `detect_sweeps` |
+| 3 | **ORDER BLOCK** | ¿Dónde se originó el movimiento? | `detect_order_block` |
+| 4 | **FVG** | ¿Dejó un desequilibrio detrás? | `detect_fvg` |
+| 5 | **FIBONACCI** | ¿El retroceso se mide contra una pierna real? | `compute_fibonacci` |
+| 6 | **ZONA OTE** | ¿El precio está a buen precio dentro de esa pierna? | `Fibonacci.in_ote` |
+
+Los seis se localizan **en una sola pasada** y devuelven un único objeto:
+
+```python
+setup = locate_six_pillars(series, atr, symbol="EURUSD")
+
+setup.pillars_found   # 4/6
+setup.entry_zone      # order block ∩ banda OTE — la confluencia, no cada uno por su lado
+setup.invalidation    # más allá de la liquidez barrida
+setup.stop_loss(buf)  # el buffer SIEMPRE amplía: baja en largo, sube en corto
+setup.target          # la liquidez hacia la que viaja el movimiento
+```
+
+Cada pilar informa **si está y, si no está, exactamente qué faltó** — porque
+*"no hay trade"* necesita una razón tan precisa como *"hay trade"*:
+
+```
+· TENDENCIA: RANGE (read before the sweep)
+✓ LIQUIDEZ: 3 sweep(s) in direction
+✓ ORDER_BLOCK: [1.10350, 1.11180] FRESH, confidence 1.0
+✓ FVG: [1.11180, 1.11320] CE 1.11250
+✓ FIBONACCI: leg 1.10680 → 1.11500
+· OTE: price 1.10800 outside [1.10855480, 1.10993240]
+```
+
+Fibonacci **nunca genera una entrada por sí solo**: puntúa a través de
+premium/discount, así que una pierna medida bajo una compra en premium vale
+cero. Y la tendencia se lee de la estructura **anterior al sweep**, porque un
+barrido imprime un mínimo más bajo a propósito: leerlo como cambio de tendencia
+sería confundir la manipulación con la señal.
+
+---
+
 ## Estado del código
 
 | Módulo | Qué hace | Estado |
@@ -28,6 +75,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 | `shared_kernel/edcs` | Decimal canónico, cuantización, JSON canónico, hashing, IDs estables | ✅ |
 | `market_data` | Ticks → velas (FORMING/CONFIRMED), watermark, ATR, Efficiency Ratio | ✅ |
 | `smart_money` | Displacement, swings, estructura, BOS/CHoCH/MSS, liquidez, sweeps, FVG, order blocks, premium/discount, OTE, Fibonacci | ✅ |
+| `strategy` | **Los seis pilares** como objeto de primera clase: localización, geometría del setup, puente al scoring | ✅ |
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
 | `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
@@ -36,8 +84,9 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 **Garantías demostradas por tests, no prometidas:** determinismo bit a bit ·
 no-repaint (una vela confirmada nunca muta) · orden de llegada irrelevante ·
-un veto vence a cualquier score · el riesgo tiene la última palabra ·
-toda decisión se explica desde su propio registro.
+sin look-ahead (leer un prefijo nunca ve las velas que vienen) · un veto vence a
+cualquier score · el stop nunca cae del lado equivocado · el riesgo tiene la
+última palabra · toda decisión se explica desde su propio registro.
 
 ---
 

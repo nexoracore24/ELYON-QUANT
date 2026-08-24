@@ -1,15 +1,17 @@
 """End-to-end demonstration of the ELYON QUANT decision pipeline.
 
 Feeds a synthetic tick stream through every layer that exists today -- market
-data assembly, Smart Money detection, scoring, risk budgeting -- and prints the
-decision the engine reaches, together with its reasoning.
+data assembly, the six-pillar strategy, scoring, risk budgeting -- and prints
+the decision the engine reaches, together with its reasoning.
+
+The strategy is one thesis:
+
+    TENDENCIA · LIQUIDEZ · ORDER BLOCK · FVG · FIBONACCI · ZONA OTE
 
 Run with:  python3 demo_pipeline.py
 """
 
 from __future__ import annotations
-
-from decimal import Decimal
 
 from elyon.modules.market_data.domain import (
     AtrProvider,
@@ -26,25 +28,15 @@ from elyon.modules.risk.domain import (
     SizingRequest,
     size_position,
 )
-from elyon.modules.smart_money.domain import (
-    Trend,
-    build_pools,
-    buy_side,
-    build_structure,
-    detect_displacement,
-    detect_fvg,
-    detect_order_block,
-    detect_sweeps,
-    detect_swings,
-    fibonacci_for,
-)
-from elyon.modules.smart_money.domain.zones import DealingRange, Pricing
 from elyon.modules.smart_money.domain.structure import Direction
+from elyon.modules.strategy.domain import (
+    locate_six_pillars,
+    pillar_summary,
+    score_setup,
+)
 from elyon.modules.trading.domain import (
     DecisionRecord,
-    Factor,
     Provenance,
-    ScoreBuilder,
     Veto,
     explain,
 )
@@ -161,150 +153,41 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     atr = atr_provider.value or dec("0.0010")
     print(f"  ATR(5): {atr}")
 
-    # 2. Structure --------------------------------------------------------
-    rule("2. Market structure")
-    structure = build_structure(series, grade=1)
-    swings = detect_swings(series, grade=1)
-    print(f"  trend (incl. sweep): {structure.trend.value}")
-    print(f"  swings detected: {len(swings)}")
-    if structure.last_high:
-        print(f"  last swing high: {structure.last_high.price}")
-    if structure.protected_low:
-        print(f"  protected low: {structure.protected_low.price}")
+    # 2. The six pillars ---------------------------------------------------
+    # One call, one object: the strategy locates all six and reports on each,
+    # whether it stands or not.
+    setup = locate_six_pillars(series, atr, symbol=SYMBOL, swing_grade=1)
 
-    # 3. Liquidity --------------------------------------------------------
-    rule("3. Liquidity")
-    pools = build_pools(swings, atr)
-    print(f"  pools mapped: {len(pools)}")
-    sweeps = []
-    for i in range(len(series)):
-        found = detect_sweeps(series, pools, i, atr)
-        if found:
-            sweeps.extend(found)
-            for s in found:
-                side = "sell-side" if s.direction is Direction.UP else "buy-side"
-                print(f"  sweep at bar {i}: {side} taken at {s.pool.level}"
-                      f" → implies {s.direction.name}")
-    if not sweeps:
-        print("  no sweeps detected")
+    rule("2. The six pillars")
+    print("  " + pillar_summary(setup).replace("\n", "\n  "))
+    print(f"\n  {setup.pillars_found}/6 aligned  ·  side: "
+          f"{setup.direction.name if setup.direction else 'none'}")
 
-    # 4. Points of interest ----------------------------------------------
-    rule("4. Points of interest")
-    displacement = None
-    for i in range(len(series) - 1, 0, -1):
-        displacement = detect_displacement(series, i, atr)
-        if displacement is not None:
-            break
+    # 3. What the pillars imply -------------------------------------------
+    rule("3. Setup geometry")
+    if setup.displacement is not None:
+        d = setup.displacement
+        print(f"  displacement: {d.direction.name} {d.move} "
+              f"over bars {d.start_index}-{d.end_index}")
+    for sweep in setup.sweeps:
+        side = "sell-side" if sweep.direction is Direction.UP else "buy-side"
+        print(f"  sweep at bar {sweep.index}: {side} taken at {sweep.pool.level}"
+              f" → implies {sweep.direction.name}")
+    if setup.pricing is not None:
+        favourable = "favourable" if setup.favourable_pricing else "against us"
+        print(f"  price {setup.price} is at a {setup.pricing.value.lower()} "
+              f"({favourable})")
+    if setup.entry_zone is not None:
+        low, high = setup.entry_zone
+        print(f"  entry zone (block ∩ OTE): [{low}, {high}]")
+    print(f"  invalidation: {setup.invalidation}   target: {setup.target}")
 
-    poi = None
-    fvg = None
-    if displacement is not None:
-        print(f"  displacement: {displacement.direction.name} "
-              f"{displacement.move} over bars "
-              f"{displacement.start_index}-{displacement.end_index}")
-        fvg = detect_fvg(series, displacement.end_index - 1, atr)
-        poi = detect_order_block(
-            series, displacement,
-            has_fvg=fvg is not None,
-            had_prior_sweep=bool(sweeps),
-        )
-        if poi:
-            print(f"  order block: [{poi.zone.low}, {poi.zone.high}] "
-                  f"state={poi.zone.state.value} confidence={poi.confidence}")
-        if fvg:
-            print(f"  fair value gap: [{fvg.zone.low}, {fvg.zone.high}] "
-                  f"CE={fvg.consequent_encroachment}")
-        else:
-            print("  no fair value gap in the displacement")
-    else:
-        print("  no displacement found")
-
-    # 5. Pricing ----------------------------------------------------------
-    rule("5. Pricing")
-    # The dealing range is the last impulsive leg, not the whole window:
-    # premium and discount only mean something relative to the move in play.
-    if displacement is not None:
-        leg = [series[i] for i in range(displacement.start_index, len(series))]
-        leg_low = min(c.low for c in leg)
-        leg_high = max(c.high for c in leg)
-    else:
-        leg_low = min(c.low for c in series)
-        leg_high = max(c.high for c in series)
-    dealing_range = DealingRange(leg_low, leg_high, Direction.UP, 0, len(series) - 1)
-    price = series[-1].close
-    pricing = dealing_range.classify(price)
-    fib = fibonacci_for(dealing_range)
-    print(f"  dealing range: [{dealing_range.low}, {dealing_range.high}]")
-    print(f"  price {price} sits at {dealing_range.position_of(price):.3f} → {pricing.value}")
-    if fib:
-        print(f"  OTE band: [{fib.ote_low}, {fib.ote_high}] optimal={fib.ote_optimal}")
-
-    # 6. Scoring ----------------------------------------------------------
-    rule("6. Scoring")
-    builder = ScoreBuilder()
-
-    # A sweep prints a lower low by design, so reading bias from the bars that
-    # include it would mistake the manipulation for a trend change. The bias
-    # comes from the structure before it, re-confirmed by the displacement.
-    # The last sweep is the one that set up this trade; earlier pokes are noise.
-    key_sweep = max(sweeps, key=lambda s_: s_.index) if sweeps else None
-    pre_sweep = (
-        build_structure(series.upto(key_sweep.index - 1), grade=1)
-        if key_sweep is not None and key_sweep.index >= 4 else structure
-    )
-    bias_confirmed = (
-        pre_sweep.trend is Trend.BULLISH
-        and displacement is not None
-        and displacement.direction is Direction.UP
-    )
-    if bias_confirmed:
-        builder.award(
-            Factor.HTF_BIAS,
-            f"{pre_sweep.trend.value} before the sweep, displacement agrees",
-        )
-    else:
-        builder.withhold(Factor.HTF_BIAS, f"pre-sweep structure {pre_sweep.trend.value}")
-
-    if displacement is not None:
-        builder.award(Factor.STRUCTURE, f"displacement {displacement.move}")
-    else:
-        builder.withhold(Factor.STRUCTURE, "no displacement")
-
-    if sweeps:
-        builder.award(Factor.LIQUIDITY_SWEEP, f"{len(sweeps)} sweep(s)")
-    else:
-        builder.withhold(Factor.LIQUIDITY_SWEEP, "no sweep")
-
-    if poi is not None:
-        builder.award(Factor.POI_QUALITY, f"order block conf {poi.confidence}")
-    else:
-        builder.withhold(Factor.POI_QUALITY, "no POI")
-
-    if fvg is not None:
-        builder.award(Factor.IMBALANCE, "FVG present")
-    else:
-        builder.withhold(Factor.IMBALANCE, "no FVG")
-
-    if pricing is Pricing.DISCOUNT:
-        builder.award(Factor.PRICING, "in discount")
-    else:
-        builder.withhold(Factor.PRICING, f"in {pricing.value.lower()}")
-
-    if fib and fib.in_ote(price):
-        builder.award(Factor.OTE_FIBONACCI, "inside OTE")
-    else:
-        builder.withhold(Factor.OTE_FIBONACCI, "outside OTE band")
-
-    builder.withhold(Factor.VOLUME, "synthetic feed, volume not meaningful")
-
-    if pools:
-        builder.award(Factor.TARGET_LIQUIDITY, f"{len(pools)} pools as targets")
-    else:
-        builder.withhold(Factor.TARGET_LIQUIDITY, "no target liquidity")
-
-    builder.check_veto(Veto.NEWS_WINDOW, False, "no events in window")
-    builder.check_veto(Veto.SPREAD_BLOWOUT, False, "spread within profile")
-    score = builder.build()
+    # 4. Scoring ----------------------------------------------------------
+    rule("4. Scoring")
+    score = score_setup(setup, vetoes=[
+        (Veto.NEWS_WINDOW, False, "no events in window"),
+        (Veto.SPREAD_BLOWOUT, False, "spread within profile"),
+    ])
 
     for factor in score.factors:
         mark = "+" if factor.satisfied else " "
@@ -312,26 +195,22 @@ def run(scenario: str, ticks: list[Tick]) -> None:
               f" {factor.condition}")
     print(f"  {'':<24} {score.total:>3}/100   threshold {score.threshold}")
 
-    # 7. Risk -------------------------------------------------------------
-    rule("7. Risk")
+    # 5. Risk -------------------------------------------------------------
+    rule("5. Risk")
     budget = RiskBudget(
         "demo-account",
         {Dimension.DAILY_LOSS: dec("300"), Dimension.TOTAL_OPEN_RISK: dec("200")},
     )
 
+    # The stop comes from the setup's own invalidation, with a buffer: the
+    # thesis dies where the swept liquidity is reclaimed, not at a round number.
+    price = setup.price
     entry = price
-    buffer = atr * dec("0.3")
-    if key_sweep is not None:
-        stop = series[key_sweep.index].low - buffer
-    elif poi:
-        stop = poi.zone.low - buffer
-    else:
-        stop = price - atr * dec("2")
-
-    # Target the furthest buy-side pool: the significant liquidity the move is
-    # actually reaching for, not the first level it happens to pass.
-    targets = buy_side(pools, price)
-    target = max((t.level for t in targets), default=dealing_range.high)
+    away = atr * dec("2") if setup.direction is not Direction.DOWN else -atr * dec("2")
+    stop = setup.stop_loss(atr * dec("0.3"))
+    if stop is None:
+        stop = price - away
+    target = setup.target if setup.target is not None else price + away * dec("2")
 
     sizing = size_position(
         SizingRequest(
@@ -364,17 +243,21 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         if sizing.reward_risk is not None:
             print(f"  reward:risk was {sizing.reward_risk:.2f}")
 
-    # 8. Decision ---------------------------------------------------------
-    rule("8. Decision")
+    # 6. Decision ---------------------------------------------------------
+    rule("6. Decision")
     tradeable = score.tradeable and sizing.approved
+    # Risk only gets the blame when the setup actually reached it. Attributing a
+    # 19/100 to the R:R filter would hide the real reason: there was no setup.
     rejection = None
-    if not tradeable and sizing.rejection is not None:
+    if score.tradeable and not sizing.approved and sizing.rejection is not None:
         rejection = f"risk:{sizing.rejection.value.lower()}"
+    short = setup.direction is Direction.DOWN
+    side = "SHORT" if short else "LONG"
     record = DecisionRecord(
         symbol=SYMBOL,
         bar_close_time_ns=series[-1].close_time_ns,
-        side="LONG",
-        action="enter_long" if tradeable else "no_trade",
+        side=side,
+        action=("enter_short" if short else "enter_long") if tradeable else "no_trade",
         score=score,
         provenance=Provenance(
             data_version="demo-dataset-v1",
@@ -382,8 +265,9 @@ def run(scenario: str, ticks: list[Tick]) -> None:
         ),
         rejection_reason=rejection,
         detected={
-            "trend": structure.trend.value,
-            "pricing": pricing.value,
+            "trend": setup.trend.value,
+            "pricing": setup.pricing.value if setup.pricing else "unclassified",
+            "pillars": f"{setup.pillars_found}/6",
             "atr": str(atr),
         },
     )

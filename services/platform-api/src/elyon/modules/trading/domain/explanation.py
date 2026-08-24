@@ -17,7 +17,7 @@ from typing import Any, Mapping
 
 from elyon.shared_kernel.edcs.canonical import stable_id
 from elyon.shared_kernel.edcs.numeric import DeterminismError
-from .scoring import Conviction, Factor, Score
+from .scoring import Conviction, Factor, Score, max_possible
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,9 +171,12 @@ def explain(record: DecisionRecord) -> Explanation:
 def _narrate(record: DecisionRecord) -> str:
     """Compose the human-readable account, deterministically."""
     score = record.score
+    # The denominator is the scale, not the score's own high-water mark: a
+    # 71 reported as "71/71" reads as a perfect setup when it is a 71 out of a
+    # possible 100. The scale never moves.
     head = (
         f"[{record.action.upper()} {record.symbol} · "
-        f"score {score.total}/{max(score.threshold, score.total)} · "
+        f"score {score.total}/{max_possible()} · "
         f"threshold {score.threshold}]"
     )
 

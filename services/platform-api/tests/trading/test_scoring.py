@@ -269,6 +269,21 @@ class TestExplanation:
         with pytest.raises(DeterminismError, match="misreport"):
             explain(self._record(tampered, "enter_long"))
 
+    def test_the_score_is_reported_against_the_full_scale(self):
+        # "71/71" would read as a perfect setup. The denominator is the scale.
+        score = (
+            ScoreBuilder()
+            .award(Factor.HTF_BIAS, "aligned")
+            .award(Factor.STRUCTURE, "CHoCH")
+            .build()
+        )
+        exp = explain(self._record(score, "no_trade"))
+        assert "score 34/100" in exp.narrative
+
+    def test_a_perfect_score_still_reports_out_of_100(self):
+        exp = explain(self._record(perfect_setup().build(), "enter_long"))
+        assert "score 100/100" in exp.narrative
+
     def test_explanations_are_reproducible(self):
         a = explain(self._record(perfect_setup().build(), "enter_long"))
         b = explain(self._record(perfect_setup().build(), "enter_long"))
