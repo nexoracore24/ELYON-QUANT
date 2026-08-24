@@ -5,17 +5,39 @@ ecosistema completo para diseñar, validar, ejecutar, monitorizar y monetizar
 estrategias cuantitativas sobre múltiples brokers y exchanges, con estándares
 de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
-> Estado del proyecto: **Fase de Diseño (Docs-first)**.
-> En este momento el repositorio contiene únicamente documentación de diseño.
-> No hay código de producto todavía (por decisión explícita).
+> Estado del proyecto: **Núcleo en construcción.**
+> La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
+> corre: datos de mercado, detectores Smart Money, riesgo y scoring, con **157
+> tests** verdes.
 >
-> 📋 **Empieza aquí:** [Plan Maestro de Documentación](docs/00-governance/documentation-master-plan.md)
-> — la lista completa de TODOS los documentos a crear antes de programar,
-> organizada por fases (D0 → D7) y con el orden exacto de construcción.
+> ```bash
+> make test    # suite completa
+> make demo    # el pipeline decidiendo, y explicándose
+> ```
 >
-> 🧊 **Estado del núcleo:** [Core Architecture Review v1.0](docs/architecture/core-architecture-review-v1.0.md)
-> — auditoría crítica de los 8 motores. Veredicto: **congelación condicional
-> `v1.0-rc1`** (madurez de diseño 84/100; 6 bloqueadores P0 por cerrar antes de GA).
+> 📋 [Plan Maestro de Documentación](docs/00-governance/documentation-master-plan.md) ·
+> 🧊 [Core Architecture Review v1.0](docs/architecture/core-architecture-review-v1.0.md) ·
+> 🔒 [Core Contracts v1.0](docs/06-api/core-contracts-v1.0.md)
+
+---
+
+## Estado del código
+
+| Módulo | Qué hace | Estado |
+|--------|----------|--------|
+| `shared_kernel/edcs` | Decimal canónico, cuantización, JSON canónico, hashing, IDs estables | ✅ |
+| `market_data` | Ticks → velas (FORMING/CONFIRMED), watermark, ATR, Efficiency Ratio | ✅ |
+| `smart_money` | Displacement, swings, estructura, BOS/CHoCH/MSS, liquidez, sweeps, FVG, order blocks, premium/discount, OTE, Fibonacci | ✅ |
+| `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
+| `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
+| `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
+| `market_context` | Gate de contexto, Market DNA | ⬜ especificado |
+| `backtesting` | Reproducibilidad y calibración | ⬜ especificado |
+
+**Garantías demostradas por tests, no prometidas:** determinismo bit a bit ·
+no-repaint (una vela confirmada nunca muta) · orden de llegada irrelevante ·
+un veto vence a cualquier score · el riesgo tiene la última palabra ·
+toda decisión se explica desde su propio registro.
 
 ---
 
