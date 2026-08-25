@@ -9,7 +9,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
-> backtesting, riesgo y scoring, con **525 tests** verdes.
+> backtesting, riesgo, scoring y el OMS, con **590 tests** verdes.
 >
 > ```bash
 > make test    # suite completa
@@ -212,6 +212,79 @@ decisiones de research y no las reescribe ningún ajuste.
 
 ---
 
+## El OMS y el problema de la orden duplicada
+
+**Toda ejecución pasa por el OMS.** Una orden colocada fuera de él no tiene log
+de eventos, ni clave de idempotencia, ni conciliación — nadie puede decir
+después qué pasó ni por qué.
+
+El estado nunca se asigna: es un **fold sobre un log inmutable**. Un proceso que
+muere a mitad de un envío vuelve, reproduce el log y sabe exactamente qué había
+hecho ya.
+
+```
+#1 CREATED
+#2 VALIDATED (structural checks passed)
+#3 RISK_APPROVED (risk approved)
+#4 QUEUED
+#5 SENT
+#6 RECOVERY_STARTED (send failed: no response from venue)
+#7 RECONCILED (adopted broker state ACKNOWLEDGED)
+```
+
+### El bug más caro que puede tener un OMS
+
+**Un envío que da timeout tiene resultado desconocido.** La orden puede estar
+descansando en el broker, puede haberse ejecutado, o puede no haber llegado
+nunca. Reenviar sobre un «quizá» es cómo una posición se convierte en dos — y
+duplica el riesgo en silencio: la cuenta se ve bien hasta que deja de verse.
+
+La respuesta es no adivinar nunca:
+
+```
+query(client_order_id)
+  existe  → adoptarla; la orden ya estaba puesta
+  ausente → reenviar, con el MISMO client order id para que el broker deduplique
+```
+
+| Escenario | Resultado | Colocaciones en el venue |
+|---|---|---|
+| Timeout, la orden **sí** llegó | adoptada | **1** (no 2) |
+| Timeout, la orden **no** llegó | reenviada con el mismo id | 1 |
+| El broker se cae durante la conciliación | **OMS halted** | 0 |
+| Enviar la misma orden dos veces | rechazado por la máquina | 1 |
+
+Tres defensas independientes:
+
+1. **La máquina de estados.** `QUEUED` es el **único** estado que llega a `SENT`.
+   Un segundo envío no está desaconsejado: es imposible.
+2. **El `client_order_id` es determinista.** Derivado del `correlation_id`, no de
+   un reloj ni de un random — un reintento tiene que ser reconociblemente la
+   *misma* orden, o el broker no puede deduplicar.
+3. **Preguntar antes de reenviar.** Y cuando la respuesta sigue siendo
+   desconocida, se hace lo único siempre seguro: dejar de enviar y proteger lo
+   abierto. **Parar no es cerrar** — cerrar durante una caída es operar a ciegas
+   en el peor momento.
+
+### Lo demás
+
+- **Fills parciales** se agregan, y el precio medio es **ponderado por volumen**:
+  promediar los precios de un fill de 0.09 y otro de 0.01 como si pesaran igual
+  falsea la entrada y todo el riesgo derivado de ella.
+- **Exactly-once lógico**: entrega at-least-once + dedup por `broker_event_id`.
+  Un execution report reentregado se aplica una vez.
+- **Un over-fill no se promedia**: el broker dice que tenemos más de lo que
+  pedimos, eso es una discrepancia que tiene que ver un humano. Va a la DLQ y el
+  OMS para.
+- **Circuit breakers por dependencia**, no globales: una caída de market data no
+  puede impedir *cerrar* una posición, y un breaker global no distingue.
+- **Outbox** contra el dual-write: el evento se persiste antes de publicarse. Un
+  publish fallido se conserva — la entrega puede ser lenta, no silenciosa.
+- **DLQ con motivo obligatorio**: una cola de muertos cuyas entradas no se pueden
+  explicar es descartar eventos con pasos extra.
+
+---
+
 ## Backtesting: cómo se gana un tier
 
 Un backtest es una afirmación sobre lo que un sistema *habría* hecho, y hay
@@ -264,7 +337,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `strategy` | **Los seis pilares** + catálogo ICT (13 estrategias), tiers por calibración, activación tri-estado, playbook de combinación, killzones | ✅ |
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
-| `execution` | OMS: ciclo de vida de la orden, idempotencia, recovery | ⬜ especificado |
+| `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
 | `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
 

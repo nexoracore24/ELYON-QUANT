@@ -34,6 +34,16 @@ from elyon.modules.market_context.domain import (
     profile_for,
     read_context,
 )
+from elyon.modules.execution.domain import (
+    ManualClock,
+    Oms,
+    OrderRequest,
+    PaperBroker,
+    Side,
+    client_order_id,
+    timeout,
+    unavailable,
+)
 from elyon.modules.smart_money.domain.structure import Direction
 from elyon.modules.strategy.domain import (
     Calibration,
@@ -343,6 +353,108 @@ def run(scenario: str, ticks: list[Tick]) -> None:
     print()
     print("  " + explanation.narrative.replace(". ", ".\n  "))
 
+    # 9. Execution --------------------------------------------------------
+    # Nothing reaches a broker except through the OMS. When the decision is
+    # no_trade there is nothing to execute -- and that, too, is recorded.
+    rule("9. Execution (OMS)")
+    if not tradeable:
+        print("  no order is created: the decision was not to trade")
+        return
+
+    clock = ManualClock(at=series[-1].close_time_ns)
+    broker = PaperBroker(clock)
+    oms = Oms(broker, clock)
+
+    coid = client_order_id(explanation.decision_id)
+    order_request = OrderRequest(
+        client_order_id=coid,
+        correlation_id=explanation.decision_id,
+        symbol=SYMBOL,
+        side=Side.BUY if not short else Side.SELL,
+        quantity=sizing.lots,
+        stop_loss=stop,
+        take_profit=target,
+    )
+    oms.create(order_request)
+    oms.validate(coid)
+    oms.approve_risk(coid, reason=f"risk approved {sizing.lots} lots")
+    oms.queue(coid)
+    print(f"  {oms.send(coid)}")
+
+    # A partial fill, then the rest -- which is how orders actually fill.
+    broker.fill(coid, sizing.lots / dec("2"), entry)
+    oms.on_fill(coid, "F-000001", sizing.lots / dec("2"), entry)
+    oms.on_fill(coid, "F-000002", sizing.lots / dec("2"), entry + atr / dec("20"))
+
+    placed = oms.order(coid)
+    print(f"  {placed}  ·  average fill {placed.average_fill_price}")
+    print()
+    print("  " + placed.history().replace("\n", "\n  "))
+
+
+def execution_failures() -> None:
+    """The failure the OMS exists to prevent."""
+    print("\n" + "=" * 68)
+    print("EXECUTION — the duplicate-order problem")
+    print("=" * 68)
+    print("  A send that times out has an *unknown* outcome. The order may be")
+    print("  resting at the broker, may have filled, or may never have arrived.")
+    print("  Resending on a maybe is how one intended position becomes two.")
+
+    def place_order(broker: PaperBroker, oms: Oms, tag: str) -> str:
+        coid = client_order_id(tag)
+        oms.create(OrderRequest(coid, tag, SYMBOL, Side.BUY, dec("0.10")))
+        oms.validate(coid)
+        oms.approve_risk(coid)
+        oms.queue(coid)
+        return coid
+
+    rule("A. Timeout, but the order did arrive")
+    clock = ManualClock()
+    broker = PaperBroker(clock, accept_despite_failure=True)
+    broker.fail_place = [timeout()]
+    oms = Oms(broker, clock)
+    coid = place_order(broker, oms, "case-a")
+    outcome = oms.send(coid)
+    print(f"  {outcome}")
+    print(f"  placements at the venue: {broker.times_placed(coid)}  ← not 2")
+
+    rule("B. Timeout, and the order never arrived")
+    clock = ManualClock()
+    broker = PaperBroker(clock, accept_despite_failure=False)
+    broker.fail_place = [timeout()]
+    oms = Oms(broker, clock)
+    coid = place_order(broker, oms, "case-b")
+    outcome = oms.send(coid)
+    print(f"  {outcome}")
+    print(f"  placements at the venue: {broker.times_placed(coid)}")
+    print("  resent under the same client order id, so the venue can dedupe")
+
+    rule("C. The broker goes dark mid-reconciliation")
+    clock = ManualClock()
+    broker = PaperBroker(clock, accept_despite_failure=True)
+    broker.fail_place = [timeout()]
+    broker.fail_query = [unavailable()]
+    oms = Oms(broker, clock)
+    coid = place_order(broker, oms, "case-c")
+    outcome = oms.send(coid)
+    print(f"  {outcome}")
+    print(f"  halted: {oms.is_halted}")
+    print("  Cannot see the broker, cannot know the truth. The OMS stops")
+    print("  sending and protects what is open — it does not guess.")
+
+    rule("D. Sending the same order twice")
+    clock = ManualClock()
+    broker = PaperBroker(clock)
+    oms = Oms(broker, clock)
+    coid = place_order(broker, oms, "case-d")
+    oms.send(coid)
+    print(f"  {oms.send(coid)}")
+    print(f"  placements at the venue: {broker.times_placed(coid)}")
+    print("  QUEUED is the only state that reaches SENT, so a second send is")
+    print("  not discouraged — it is impossible.")
+
+
 def strategy_catalog() -> None:
     """The catalog, and what switching strategies on actually changes."""
     series = build_candles(bullish_setup())
@@ -483,6 +595,7 @@ def main() -> None:
     run("A+ setup (uptrend, sweep, displacement)", bullish_setup())
     run("Choppy market (no edge)", choppy_market())
     strategy_catalog()
+    execution_failures()
     backtest_loop()
 
     print("\n" + "=" * 68)
