@@ -9,16 +9,86 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > La arquitectura está congelada (`v1.0-rc1`) y el primer código del motor ya
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
-> backtesting, riesgo, scoring y el OMS, con **590 tests** verdes.
+> backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
+> ejecutable, con **680 tests** verdes.
 >
 > ```bash
-> make test    # suite completa
-> make demo    # el pipeline decidiendo, y explicándose
+> make test          # suite completa
+> make demo          # el pipeline decidiendo, y explicándose
+> make strategies    # el catálogo y sus tiers
 > ```
 >
 > 📋 [Plan Maestro de Documentación](docs/00-governance/documentation-master-plan.md) ·
 > 🧊 [Core Architecture Review v1.0](docs/architecture/core-architecture-review-v1.0.md) ·
 > 🔒 [Core Contracts v1.0](docs/06-api/core-contracts-v1.0.md)
+
+---
+
+## Empezar a usarlo
+
+```bash
+make install                        # pytest, nada más
+make test                           # 680 tests
+make demo                           # el pipeline entero, explicándose
+```
+
+**1. Mira qué hay.**
+
+```bash
+make strategies      # las 13 estrategias, sus familias y sus tiers
+make dna             # los 7 perfiles de instrumento
+```
+
+**2. Crea una configuración.**
+
+```bash
+make config SYMBOL=EURUSD > session.json
+```
+
+Sale con `mode: PAPER`, la estrategia de la casa en vivo y el resto en shadow.
+`LIVE` hay que escribirlo a mano: un sistema donde el modo peligroso es el que
+te toca por no elegir acaba operando dinero real por accidente.
+
+**3. Consigue barras.** CSV con cabecera `time,open,high,low,close[,volume]`.
+El tiempo admite epoch en segundos, milisegundos o nanosegundos, o ISO. Los
+precios se leen como **string** y se convierten con `dec` — nunca por float,
+porque `1.10005` pasado por un float vuelve como `1.1000499999999999` y dos
+ejecuciones sobre el mismo fichero dejan de coincidir.
+
+**4. Ejecútalo.**
+
+```bash
+make run CONFIG=session.json DATA=bars.csv FLAGS=--learn-dna
+```
+
+```
+⚠ 1 live strategy(ies) have no calibration (SIX_PILLARS); they cannot open
+  a trade alone, so this session will take no trades until they are measured
+
+EURUSD · PAPER · 600 bars
+  entries taken   0
+  where the pipeline stopped:
+    context          480
+    playbook          80
+    warmup            40
+```
+
+**Sí: recién instalado no opera.** Todo está en ⚪ y el gate lo rechaza. Es
+deliberado, y el aviso lo dice antes de que te preguntes por qué.
+
+Lo útil de esa tabla es que te dice **en qué etapa se paró** en cada vela. «No
+hay trade» no es una respuesta, son ocho, y un sistema que no las distingue no
+se puede depurar.
+
+**5. Calibra para desbloquearlo.**
+
+```bash
+make calibrate DATA=bars.csv STRATEGY=SIX_PILLARS SAMPLE=OUT_OF_SAMPLE
+```
+
+Si la muestra da menos de 30 operaciones, te lo dice en esos términos: *«This
+changes nothing: 12 trades is below the 30 needed»*. Nada de «certificado»
+junto a un ⚪ — eso se lee como luz verde para algo que no va a hacer nada.
 
 ---
 
@@ -212,6 +282,39 @@ decisiones de research y no las reescribe ningún ajuste.
 
 ---
 
+## Gestionar la posición
+
+Entrar es la mitad fácil. Lo que decide si una estrategia con ventaja acaba
+componiendo es lo que pasa después: cuándo se mueve el stop, cuándo sale una
+parte, cuándo se cierra una operación que no va a ningún sitio.
+
+**Una regla domina todo:**
+
+> **El stop nunca se mueve en contra de la posición. Nunca.**
+
+Un stop «dinámico» que puede ensancharse no es un stop dinámico: es un stop que
+alguien movió porque no le gustaba estar equivocado, y es la forma más fiable
+de convertir una pérdida acotada en una ilimitada. Toda función que devuelve un
+stop se compara con el que sustituye, y un movimiento hacia atrás se **rechaza**,
+no se registra.
+
+| Regla | Por defecto | Detalle |
+|---|---|---|
+| **Break-even** | a 1.0R | Va **más allá** de la entrada, no *a* la entrada: un stop justo en la entrada sigue perdiendo el spread |
+| **Trailing** | desde 1.5R, a 1.5×ATR | Nunca antes del break-even, o el primer trail movería el stop hacia atrás |
+| **Parcial** | 50% a 1.5R | Se contabiliza al **precio del disparo**, no al cierre de la vela: la orden estaba puesta ahí |
+| **Time stop** | 40 velas sin llegar a 0.3R | Capital atado a algo que no funciona es capital que no está en algo que sí |
+
+Todo en **R**, así que las mismas reglas valen sin tocar nada para un stop de 5
+pips en EURUSD y uno de 30 dólares en oro. Y **1R no se rebasea** cuando el stop
+se mueve: hacerlo haría que una operación pareciese mejor solo por haber sido
+gestionada.
+
+Cuando una vela contiene stop *y* objetivo, se asume el stop — misma regla que
+el backtester, por la misma razón.
+
+---
+
 ## El OMS y el problema de la orden duplicada
 
 **Toda ejecución pasa por el OMS.** Una orden colocada fuera de él no tiene log
@@ -336,7 +439,8 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `smart_money` | Displacement, swings, estructura, BOS/CHoCH/MSS, liquidez, sweeps, FVG, order blocks, premium/discount, OTE, Fibonacci | ✅ |
 | `strategy` | **Los seis pilares** + catálogo ICT (13 estrategias), tiers por calibración, activación tri-estado, playbook de combinación, killzones | ✅ |
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
-| `trading` | Scoring Engine, DecisionRecord, explicabilidad | ✅ |
+| `trading` | Scoring Engine, DecisionRecord, explicabilidad, gestión de posición (BE, trailing, parciales, time stop) | ✅ |
+| `session` | Configuración, runner tick→decisión→orden, diagnóstico por etapa | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
 | `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
@@ -378,6 +482,27 @@ El motor SMC incluye **Fibonacci Institucional** (anclado a estructura, nunca
 indicador independiente; provee la OTE) y es **explicable por diseño**: nunca
 responde *"entró porque sí"*. El pipeline se abre siempre con el **gate de
 contexto** (Market Context Engine).
+
+---
+
+## Qué falta para producción
+
+Honestidad sobre el estado real, porque lo que existe está probado y lo que no,
+no:
+
+| Falta | Qué implica |
+|---|---|
+| **Adaptador de broker real** | El `BrokerAdapter` es un `Protocol` y hay un `PaperBroker` que sabe fallar como fallan los reales. Conectar MT5/IB/Binance es implementar tres métodos — `place`, `query`, `cancel` — pero necesita credenciales y un entorno que aquí no existe |
+| **Feed de datos en vivo** | La sesión consume ticks; falta quien se los dé |
+| **Calendario económico** | Sin él `NEWS_CLEAR` se retiene y el techo de contexto es 92/100 |
+| **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
+| **Persistencia** | El log de eventos vive en memoria. Event sourcing está hecho; falta el store |
+| **SMT Divergence** | Necesita feed de un instrumento correlacionado |
+| **Saga durable / gateway en Rust** | ADR-EXE-3 y ADR-EXE-7, fuera del alcance actual |
+
+Lo que **sí** puedes hacer hoy: correr sesiones completas sobre datos
+históricos, calibrar estrategias, comparar configuraciones, y ver exactamente
+por qué el motor decidió lo que decidió en cada vela.
 
 ---
 
