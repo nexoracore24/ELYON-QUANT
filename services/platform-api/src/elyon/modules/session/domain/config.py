@@ -204,7 +204,13 @@ class SessionConfig:
             "strategies": sorted(s.value for s in self.strategies),
             "shadowStrategies": sorted(s.value for s in self.shadow_strategies),
             "conflictPolicy": self.conflict_policy.value,
-            "calibrated": sorted(s.value for s in self.calibrations),
+            # The sample itself, not just which strategies had one: a session
+            # running on 180 trades of evidence is not the same session as one
+            # running on 40, and a replay has to be able to tell them apart.
+            "calibrations": sorted(
+                f"{s.value}:{c.sample_size}:{c.expectancy_r}:{c.dataset}"
+                for s, c in self.calibrations.items()
+            ),
             "riskPerTrade": str(self.risk.risk_per_trade),
             "dailyLossLimit": str(self.risk.daily_loss_limit),
             "minRewardRisk": str(self.risk.min_reward_risk),
@@ -237,7 +243,7 @@ class SessionConfig:
             "symbol", "mode", "timeframe", "strategies", "shadowStrategies",
             "conflictPolicy", "risk", "atrPeriod", "swingGrade", "warmupBars",
             "lookbackBars", "entryScoreThreshold", "allowUncalibratedLive",
-            "skipContextGate", "management",
+            "skipContextGate", "management", "calibrations",
         }
         unknown = set(raw) - known
         if unknown:
@@ -276,6 +282,7 @@ class SessionConfig:
         )
 
         return cls(
+            calibrations=_calibrations(raw.get("calibrations", [])),
             symbol=str(raw["symbol"]),
             mode=Mode(raw.get("mode", "PAPER")),
             timeframe=str(raw.get("timeframe", "M1")),
@@ -299,6 +306,39 @@ class SessionConfig:
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(json.dumps(self.to_canonical_dict(), indent=2))
+
+
+def _calibrations(entries: Any) -> dict[StrategyId, Calibration]:
+    """The evidence that lets a strategy trade, as `elyon calibrate` prints it.
+
+    Loaded verbatim rather than as a tier: a config supplies the *sample* it
+    measured, and the tier is derived from it by the same rules everywhere. That
+    way no configuration file can claim a tier it did not earn.
+    """
+    resolved: dict[StrategyId, Calibration] = {}
+    for entry in entries:
+        missing = {"strategy", "sampleSize", "wins", "expectancyR"} - set(entry)
+        if missing:
+            raise DeterminismError(
+                f"calibration entry is missing {', '.join(sorted(missing))}. "
+                f"Copy the block printed by `elyon calibrate` verbatim."
+            )
+        try:
+            strategy = StrategyId(entry["strategy"])
+        except ValueError as exc:
+            known = ", ".join(s.value for s in StrategyId)
+            raise DeterminismError(
+                f"unknown strategy {entry['strategy']!r} in calibrations; "
+                f"known strategies are: {known}"
+            ) from exc
+        resolved[strategy] = Calibration(
+            sample_size=int(entry["sampleSize"]),
+            wins=int(entry["wins"]),
+            expectancy_r=dec(str(entry["expectancyR"])),
+            max_drawdown_r=dec(str(entry.get("maxDrawdownR", "0"))),
+            dataset=str(entry.get("dataset", "")),
+        )
+    return resolved
 
 
 def _optional_dec(value: Any) -> Decimal | None:

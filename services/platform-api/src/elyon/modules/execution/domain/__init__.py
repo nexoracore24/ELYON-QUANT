@@ -38,6 +38,13 @@ from .ports import (
     Clock,
     ManualClock,
 )
+from .store import (
+    CorruptLog,
+    EventStore,
+    InMemoryEventStore,
+    JsonlEventStore,
+    LoadedLog,
+)
 from .resilience import (
     BreakerState,
     CircuitBreaker,
@@ -48,7 +55,8 @@ from .resilience import (
 )
 
 __all__ = [
-    "BreakerState", "BrokerAck", "BrokerAdapter", "BrokerError",
+    "BreakerState", "BrokerAck", "CorruptLog", "EventStore",
+    "InMemoryEventStore", "JsonlEventStore", "LoadedLog", "BrokerAdapter", "BrokerError",
     "BrokerErrorKind", "BrokerOrderState", "CircuitBreaker", "Clock",
     "DeadLetter", "DeadLetterQueue", "EventKind", "Fill", "IllegalTransition",
     "ManualClock", "Oms", "OmsConfig", "Order", "OrderEvent", "OrderRequest",

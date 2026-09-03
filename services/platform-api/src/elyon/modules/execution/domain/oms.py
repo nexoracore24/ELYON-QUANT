@@ -44,6 +44,7 @@ from .ports import (
     Clock,
 )
 from .resilience import CircuitBreaker, DeadLetterQueue, Outbox
+from .store import EventStore, InMemoryEventStore
 
 SECOND_NS = 1_000_000_000
 
@@ -129,6 +130,11 @@ class Oms:
     )
     outbox: Outbox = field(default_factory=Outbox)
     dlq: DeadLetterQueue = field(default_factory=DeadLetterQueue)
+    # Where the log survives a restart. The in-memory default is right for a
+    # backtest and wrong for anything holding a position: without a durable
+    # store, "the OMS recovers what it was doing" is true only until the
+    # process ends.
+    store: EventStore = field(default_factory=InMemoryEventStore)
 
     _log: dict[str, list[OrderEvent]] = field(default_factory=dict)
     _requests: dict[str, OrderRequest] = field(default_factory=dict)
@@ -158,6 +164,9 @@ class Oms:
             payload=event.payload,
         )
         self._log.setdefault(event.client_order_id, []).append(stamped)
+        # Durable before anyone is told. The outbox is a publication queue; the
+        # store is the record, and the record has to exist first.
+        self.store.append_event(stamped)
         self.outbox.enqueue(stamped)
         return stamped
 
@@ -197,6 +206,7 @@ class Oms:
 
         self._requests[request.client_order_id] = request
         self._log[request.client_order_id] = []
+        self.store.append_order(request)
         self._record(OrderEvent(
             kind=EventKind.CREATED,
             client_order_id=request.client_order_id,
@@ -489,6 +499,37 @@ class Oms:
                     self.reconcile(order.client_order_id, trigger="restart recovery")
                 )
         return outcomes
+
+    @classmethod
+    def restore(
+        cls,
+        store: EventStore,
+        adapter: BrokerAdapter,
+        clock: Clock,
+        **kwargs,
+    ) -> "Oms":
+        """Rebuild an OMS from a durable log.
+
+        This is the other half of the promise event sourcing makes. The restored
+        instance is not "close to" what died -- every order is folded from the
+        same events in the same order, so it *is* what died, minus whatever was
+        mid-flight. Call :meth:`recover` next to find out what the broker did
+        while the process was gone.
+        """
+        loaded = store.load()
+        oms = cls(adapter=adapter, clock=clock, store=store, **kwargs)
+        oms._requests = dict(loaded.requests)
+        oms._log = {coid: list(log) for coid, log in loaded.events.items()}
+        oms._sequence = loaded.last_sequence
+
+        # Rebuilding proves the log folds cleanly. Discovering it does not, on
+        # the first order that needs acting on, would be much worse.
+        loaded.rebuild()
+        return oms
+
+    @property
+    def restored_orders(self) -> int:
+        return len(self._requests)
 
     def health(self) -> str:
         exposed = self.exposed_orders()

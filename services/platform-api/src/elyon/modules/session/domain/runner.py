@@ -23,6 +23,8 @@ from typing import Iterable, Sequence
 from elyon.modules.execution.domain import (
     BrokerAdapter,
     Clock,
+    EventStore,
+    InMemoryEventStore,
     ManualClock,
     Oms,
     OrderRequest,
@@ -108,6 +110,9 @@ class TradingSession:
     dna: MarketDna | None = None
     broker: BrokerAdapter | None = None
     clock: Clock | None = None
+    # Where the order log survives a restart. In-memory is right for a backtest
+    # and wrong for anything that can hold a position overnight.
+    store: EventStore | None = None
 
     _builder: CandleBuilder = field(init=False)
     _atr: AtrProvider = field(init=False)
@@ -134,7 +139,9 @@ class TradingSession:
             self.clock = ManualClock()
         if self.broker is None:
             self.broker = PaperBroker(self.clock)
-        self._oms = Oms(self.broker, self.clock)
+        if self.store is None:
+            self.store = InMemoryEventStore()
+        self._oms = Oms(self.broker, self.clock, store=self.store)
         self._budget = RiskBudget(
             f"{self.config.symbol}-session",
             {

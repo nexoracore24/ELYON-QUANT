@@ -269,6 +269,77 @@ class TestConfigFiles:
         assert json.loads(target.read_text())["symbol"] == "EURUSD"
 
 
+class TestCalibrationsInConfig:
+    """The link that closes the loop: `calibrate` prints, config consumes."""
+
+    def test_a_calibration_block_loads(self):
+        cfg = SessionConfig.from_dict({
+            "symbol": "EURUSD",
+            "calibrations": [{
+                "strategy": "SIX_PILLARS", "sampleSize": 180, "wins": 92,
+                "expectancyR": "0.42", "dataset": "eurusd-2024",
+            }],
+        })
+        from elyon.modules.strategy.domain import ProbabilityTier
+        assert cfg.playbook().tier_of(StrategyId.SIX_PILLARS) \
+            is ProbabilityTier.HIGH
+        assert cfg.warnings() == ()
+
+    def test_the_config_supplies_a_sample_not_a_tier(self):
+        # A configuration file cannot claim a tier it did not earn: it gives
+        # the numbers, and the same rules derive the tier everywhere.
+        cfg = SessionConfig.from_dict({
+            "symbol": "EURUSD",
+            "calibrations": [{
+                "strategy": "SIX_PILLARS", "sampleSize": 200, "wins": 180,
+                "expectancyR": "-0.30",
+            }],
+        })
+        from elyon.modules.strategy.domain import ProbabilityTier
+        # 90% win rate, negative expectancy -> LOW, whatever the file wanted.
+        assert cfg.playbook().tier_of(StrategyId.SIX_PILLARS) \
+            is ProbabilityTier.LOW
+
+    def test_a_short_sample_still_leaves_it_unproven(self):
+        cfg = SessionConfig.from_dict({
+            "symbol": "EURUSD",
+            "calibrations": [{
+                "strategy": "SIX_PILLARS", "sampleSize": 12, "wins": 11,
+                "expectancyR": "2.5",
+            }],
+        })
+        assert any("no calibration" in w for w in cfg.warnings())
+
+    def test_an_incomplete_block_says_what_is_missing(self):
+        with pytest.raises(DeterminismError, match="expectancyR"):
+            SessionConfig.from_dict({
+                "symbol": "EURUSD",
+                "calibrations": [{"strategy": "SIX_PILLARS", "sampleSize": 100,
+                                  "wins": 50}],
+            })
+
+    def test_an_unknown_strategy_is_refused(self):
+        with pytest.raises(DeterminismError, match="unknown strategy"):
+            SessionConfig.from_dict({
+                "symbol": "EURUSD",
+                "calibrations": [{"strategy": "MADE_UP", "sampleSize": 100,
+                                  "wins": 50, "expectancyR": "0.4"}],
+            })
+
+    def test_the_sample_changes_the_provenance_hash(self):
+        # A session running on 180 trades of evidence is not the same session
+        # as one running on 40, and a replay has to tell them apart.
+        def with_sample(size: int) -> SessionConfig:
+            return SessionConfig.from_dict({
+                "symbol": "EURUSD",
+                "calibrations": [{"strategy": "SIX_PILLARS",
+                                  "sampleSize": size, "wins": size // 2,
+                                  "expectancyR": "0.42"}],
+            })
+
+        assert with_sample(180).config_hash != with_sample(40).config_hash
+
+
 class TestRegistryWiring:
     def test_live_and_shadow_reach_the_registry(self):
         cfg = config(

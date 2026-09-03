@@ -38,6 +38,7 @@ from elyon.modules.market_context.domain import (
 )
 from elyon.modules.market_data.domain.model import Candle, CandleState, Timeframe
 from elyon.modules.market_data.domain.series import CandleSeries
+from elyon.modules.execution.domain import JsonlEventStore
 from elyon.modules.session.domain import Mode, SessionConfig, TradingSession
 from elyon.modules.strategy.domain import (
     CATALOG,
@@ -201,7 +202,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(f"learned DNA from {len(series)} bars: "
               f"typical ATR {dna.typical_atr}", file=sys.stderr)
 
-    session = TradingSession(config, dna=dna)
+    store = JsonlEventStore(Path(args.journal)) if args.journal else None
+    session = TradingSession(config, dna=dna, store=store)
     for candle in series:
         session._on_candle(candle)
 
@@ -218,6 +220,8 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     print(f"\nconfig hash {config.config_hash[:16]}…  ·  "
           f"dna hash {dna.dna_hash[:16]}…")
+    if store is not None:
+        print(f"order journal: {store.path} ({store.size_bytes} bytes)")
     return EXIT_OK
 
 
@@ -318,6 +322,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--data", required=True, help="CSV of OHLC bars")
     run.add_argument("--learn-dna", action="store_true",
                      help="derive the instrument profile from this data")
+    run.add_argument("--journal", help="append the order log to this file, so "
+                                       "a restart can recover what was in flight")
     run.add_argument("--verbose", "-v", action="store_true")
     run.set_defaults(func=cmd_run)
 

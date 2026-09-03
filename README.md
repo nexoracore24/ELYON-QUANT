@@ -10,7 +10,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
-> ejecutable, con **680 tests** verdes.
+> ejecutable con log persistente, con **710 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -28,7 +28,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 680 tests
+make test                           # 710 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -89,6 +89,30 @@ make calibrate DATA=bars.csv STRATEGY=SIX_PILLARS SAMPLE=OUT_OF_SAMPLE
 Si la muestra da menos de 30 operaciones, te lo dice en esos términos: *«This
 changes nothing: 12 trades is below the 30 needed»*. Nada de «certificado»
 junto a un ⚪ — eso se lee como luz verde para algo que no va a hacer nada.
+
+Cuando sí certifica, imprime un bloque que va tal cual a `session.json`:
+
+```json
+"calibrations": [
+  {"strategy": "SIX_PILLARS", "sampleSize": 180, "wins": 92,
+   "expectancyR": "0.42", "dataset": "eurusd-2024-h1"}
+]
+```
+
+Fíjate en que el fichero da la **muestra**, no el tier. Un config no puede
+reclamar un tier que no midió: las mismas reglas lo derivan en todas partes, así
+que 180 operaciones con 90% de aciertos y expectancy −0.30 siguen dando 🔴 LOW
+por mucho que quien escribió el fichero pensara otra cosa.
+
+**6. Deja rastro en disco.**
+
+```bash
+make run CONFIG=session.json DATA=bars.csv FLAGS="--journal orders.jsonl"
+```
+
+Append-only, una línea JSON por evento, `fsync` por defecto. Un proceso que
+muere a mitad de un envío vuelve, reproduce el log y sabe exactamente qué había
+hecho — y `recover()` le pregunta al broker qué pasó mientras estaba muerto.
 
 ---
 
@@ -386,6 +410,19 @@ Tres defensas independientes:
 - **DLQ con motivo obligatorio**: una cola de muertos cuyas entradas no se pueden
   explicar es descartar eventos con pasos extra.
 
+### El log en disco
+
+Append-only, una línea JSON por evento, `fsync` por defecto — «persistido» que
+sobrevive a un crash de proceso pero no a un corte de luz no es la garantía en
+la que se apoya el OMS. Formato elegido por lo que cuesta cuando algo va mal a
+las tres de la mañana: se puede `grep`, `tail`, `diff`, no necesita servidor, y
+un fichero corrupto se repara a mano.
+
+Un crash a mitad de escritura deja **la última línea rota**: ese evento nunca se
+completó, así que descartarla es la lectura correcta. Una línea rota en
+**cualquier otro sitio** es daño, y cargar falla en voz alta — reconstruir una
+posición desde un agujero es peor que negarse a abrir el fichero.
+
 ---
 
 ## Backtesting: cómo se gana un tier
@@ -441,6 +478,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad, gestión de posición (BE, trailing, parciales, time stop) | ✅ |
 | `session` | Configuración, runner tick→decisión→orden, diagnóstico por etapa | ✅ |
+| `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
 | `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
@@ -493,10 +531,10 @@ no:
 | Falta | Qué implica |
 |---|---|
 | **Adaptador de broker real** | El `BrokerAdapter` es un `Protocol` y hay un `PaperBroker` que sabe fallar como fallan los reales. Conectar MT5/IB/Binance es implementar tres métodos — `place`, `query`, `cancel` — pero necesita credenciales y un entorno que aquí no existe |
+| **Cancelar el resto de un fill parcial** | Una orden con posición abierta no se puede cancelar: `CANCELLED` es terminal y la posición sigue viva. Cancelar el remanente es otra operación y aún no está modelada |
 | **Feed de datos en vivo** | La sesión consume ticks; falta quien se los dé |
 | **Calendario económico** | Sin él `NEWS_CLEAR` se retiene y el techo de contexto es 92/100 |
 | **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
-| **Persistencia** | El log de eventos vive en memoria. Event sourcing está hecho; falta el store |
 | **SMT Divergence** | Necesita feed de un instrumento correlacionado |
 | **Saga durable / gateway en Rust** | ADR-EXE-3 y ADR-EXE-7, fuera del alcance actual |
 
