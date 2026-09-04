@@ -10,7 +10,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
-> ejecutable con log persistente, con **760 tests** verdes.
+> ejecutable con log persistente y adaptador MT5/Exness, con **799 tests**
+> verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -28,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 760 tests
+make test                           # 799 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -497,6 +498,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `session` | Configuración, runner tick→decisión→orden, diagnóstico por etapa | ✅ |
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
+| `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment` | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
@@ -585,6 +587,38 @@ sirve de nada.
 
 > **Estas comprobaciones colocan órdenes.** Contra una cuenta demo.
 
+### Exness / MetaTrader 5
+
+Hay un adaptador escrito: `modules/execution/infrastructure/mt5.py`. Antes de
+conectarlo hay que entender una cosa, y no es opcional.
+
+**MT5 no tiene client order id.** `order_send` acepta un `magic` y un `comment`
+de ~31 caracteres, y ninguno deduplica: manda la misma petición dos veces y
+tienes **dos posiciones**. De las tres defensas anti-duplicado, contra MT5 solo
+quedan dos:
+
+| Defensa | Contra MT5 |
+|---|---|
+| `QUEUED` es el único camino a `SENT` | ✅ intacta |
+| Preguntar antes de reenviar | ✅ intacta — **y carga todo el peso** |
+| Deduplicación del venue | ❌ **no existe** |
+
+El OMS nunca reenvía a ciegas, así que sigue siendo seguro *siempre que `query`
+sea fiable*. Por eso el adaptador busca en **cuatro sitios** —pendientes,
+posiciones, deals de hoy e historial— y **jamás** lee un fallo de consulta como
+«no existe»: eso sería el bug de duplicación disfrazado.
+
+La comprobación `duplicate place is deduplicated` **fallará** contra MT5. Es un
+hecho del venue, está documentado, y no es un fallo del adaptador.
+
+Requisitos: `MetaTrader5` es **solo Windows**, con el terminal corriendo,
+logueado y con trading algorítmico habilitado. Los símbolos de Exness llevan
+sufijo según el tipo de cuenta (`EURUSDm` en Standard/Cent) — se configura en
+`Mt5Config(symbol_suffix="m")`, no renombrando cosas en la estrategia.
+
+📄 **[Guía completa: conectar Exness](docs/07-operations/connecting-exness.md)** —
+credenciales, orden de puesta en marcha, y qué esperar de cada comprobación.
+
 ---
 
 ## Qué falta para producción
@@ -594,7 +628,8 @@ no:
 
 | Falta | Qué implica |
 |---|---|
-| **Adaptador de broker real** | El `BrokerAdapter` es un `Protocol` y hay un `PaperBroker` que sabe fallar como fallan los reales. Conectar MT5/IB/Binance es implementar tres métodos — `place`, `query`, `cancel` — pero necesita credenciales y un entorno que aquí no existe |
+| **Verificar el adaptador MT5 contra un terminal real** | Escrito y probado contra un terminal falso; los retcodes están transcritos de memoria y hay que verificarlos. `elyon conformance` en cuenta demo es el paso que falta |
+| **Otros brokers** | IB, Binance: tres métodos cada uno. El kit de conformidad ya existe |
 | **Feed de datos en vivo** | La sesión consume ticks; falta quien se los dé |
 | **Calendario poblado** | El motor lo lee; hay que traer los eventos de un proveedor |
 | **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
