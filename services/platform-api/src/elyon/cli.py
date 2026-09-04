@@ -10,7 +10,8 @@ system that stops starting one day.
     elyon run --config c.json --data bars.csv
     elyon calibrate --data bars.csv --strategy SIX_PILLARS
     elyon conformance --adapter mybroker:build
-    elyon serve --config c.json --data bars.csv
+    elyon useradd owner --role OWNER
+    elyon serve --config c.json --data bars.csv --login
 """
 
 from __future__ import annotations
@@ -294,11 +295,88 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+DEFAULT_OPERATORS_FILE = "operators.json"
+
+
+def _password_from(args: argparse.Namespace, *, confirm: bool) -> str:
+    """Read a password without it ending up anywhere it can be read back.
+
+    ``getpass`` rather than an argument: a password on a command line is in the
+    shell history, in ``ps`` output, and in whatever ships the shell history
+    somewhere else. ``--stdin`` exists for scripts, which is a deliberate
+    choice someone makes rather than the easy default.
+    """
+    import getpass
+
+    if getattr(args, "stdin", False):
+        return sys.stdin.readline().rstrip("\n")
+    password = getpass.getpass("password: ")
+    if confirm and getpass.getpass("again: ") != password:
+        raise SystemExit("passwords do not match")
+    return password
+
+
+def _store(args: argparse.Namespace):
+    from elyon.modules.api.domain import OperatorStore
+
+    return OperatorStore.load(getattr(args, "operators", None)
+                              or DEFAULT_OPERATORS_FILE)
+
+
+def cmd_useradd(args: argparse.Namespace) -> int:
+    """Create the account that signs in to the app."""
+    from elyon.modules.api.domain import Role
+
+    store = _store(args)
+    role = Role(args.role)
+    operator = store.add(args.username, _password_from(args, confirm=True), role)
+
+    print(f"\ncreated {operator.username} ({role.value}: {role.summary})")
+    print(f"  stored in {store.path} with permissions 0600")
+    if role is Role.OWNER:
+        print(
+            "\n  An OWNER can start the engine, change the risk and switch to\n"
+            "  LIVE. If you only want to watch and stop from a phone, make\n"
+            "  that account an OPERATOR instead -- a device you carry through\n"
+            "  airports should not be able to raise your risk."
+        )
+    return EXIT_OK
+
+
+def cmd_users(args: argparse.Namespace) -> int:
+    store = _store(args)
+    print(f"\n{store.path}\n")
+    print(store.summary())
+    if not len(store):
+        print("\n  Create one with: elyon useradd <name> --role OWNER")
+    print()
+    return EXIT_OK
+
+
+def cmd_passwd(args: argparse.Namespace) -> int:
+    store = _store(args)
+    store.set_password(args.username, _password_from(args, confirm=True))
+    print(f"password changed for {args.username}")
+    print(
+        "  Sessions already signed in stay valid until they expire. Restart "
+        "the engine to end them now."
+    )
+    return EXIT_OK
+
+
+def cmd_userdel(args: argparse.Namespace) -> int:
+    store = _store(args)
+    store.remove(args.username)
+    print(f"removed {args.username}")
+    return EXIT_OK
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Serve the control surface a phone connects to."""
     from elyon.modules.api.domain import (
-        ServerConfig, TokenRegistry, build_server, command_token,
-        live_panel_for, panel_for, phone_token,
+        DEFAULT_IDLE_TIMEOUT, LoginService, OperatorStore, ServerConfig,
+        TokenRegistry, build_server, command_token, live_panel_for, panel_for,
+        phone_token,
     )
 
     config = SessionConfig.load(args.config)
@@ -312,6 +390,24 @@ def cmd_serve(args: argparse.Namespace) -> int:
     for candle in series:
         session._on_candle(candle)
 
+    # With accounts, the engine comes up halted. "Start" has to be a real
+    # action or it is decoration -- and an app whose first screen shows an
+    # engine already trading gives nobody a chance to check the settings first.
+    accounts = None
+    login = None
+    if args.login:
+        accounts = OperatorStore.load(args.operators or DEFAULT_OPERATORS_FILE)
+        if not len(accounts):
+            print(
+                f"no operators in {accounts.path}. Create one first:\n\n"
+                f"    elyon useradd owner --role OWNER\n\n"
+                f"There is no default login. A default credential on something "
+                f"that can place orders is not a convenience.",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        session.oms.halt("not started yet -- press Start when you are ready")
+
     runner = None
     if args.live:
         from elyon.modules.execution.infrastructure.mt5_feed import Mt5TickFeed
@@ -320,32 +416,57 @@ def cmd_serve(args: argparse.Namespace) -> int:
         feed = Mt5TickFeed(config.symbol)
         feed.ensure_symbol()
         runner = LiveRunner(session, feed)
-        runner.start()
-        print(f"live feed started on {feed.venue_symbol}\n")
+        # With accounts the feed waits for Start too, so that a person sees the
+        # settings before the engine sees a tick.
+        if not args.login:
+            runner.start()
+            print(f"live feed started on {feed.venue_symbol}\n")
 
-    tokens = TokenRegistry()
-    phone = phone_token("phone")
-    tokens.add(phone)
-    if args.allow_command:
-        tokens.add(command_token("console"))
+    tokens = TokenRegistry(
+        idle_timeout_seconds=DEFAULT_IDLE_TIMEOUT if args.login else None
+    )
+    phone = None
+    if accounts is not None:
+        login = LoginService(accounts, tokens)
+    else:
+        phone = phone_token("phone")
+        tokens.add(phone)
+        if args.allow_command:
+            tokens.add(command_token("console"))
 
     settings = ServerConfig(host=args.host, port=args.port)
     for warning in settings.warnings():
         print(f"⚠ {warning}\n", file=sys.stderr)
 
     panel = (
-        live_panel_for(runner, allow_resume=args.allow_command)
+        live_panel_for(
+            runner, allow_resume=args.allow_command, login=login,
+        )
         if runner is not None
-        else panel_for(session, allow_resume=args.allow_command)
+        else panel_for(
+            session,
+            allow_resume=args.allow_command,
+            login=login,
+            configurable=args.login,
+        )
     )
     server = build_server(panel, tokens, settings)
 
-    print(f"ELYON QUANT control surface\n")
+    print("ELYON QUANT control surface\n")
     print(f"  http://{args.host}:{args.port}/\n")
-    print("  Paste this token into the page. It is printed once:\n")
-    print(f"    {phone.secret}\n")
-    print("  The phone can watch and can stop. It cannot resume, cannot")
-    print("  change risk, and cannot enable a strategy -- those stay here.")
+    if accounts is not None:
+        print(f"  Sign in with one of the {len(accounts)} account(s) in "
+              f"{accounts.path}:\n")
+        print(accounts.summary())
+        print("\n  The engine is halted. An OWNER starts it from the app,")
+        print("  after checking the settings. An OPERATOR can only stop it --")
+        print("  which is the point: stopping is safe, starting is not.")
+    else:
+        print("  Paste this token into the page. It is printed once:\n")
+        print(f"    {phone.secret}\n")
+        print("  The phone can watch and can stop. It cannot resume, cannot")
+        print("  change risk, and cannot enable a strategy -- those stay here.")
+        print("\n  For a login instead of a pasted token: elyon serve --login")
     if not settings.is_exposed:
         print("\n  Bound to localhost. To reach it from a phone, put both")
         print("  devices on a VPN (Tailscale, WireGuard) or forward the port")
@@ -462,7 +583,43 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-command", action="store_true",
         help="also issue a token that can resume trading. Not for a phone.",
     )
+    serve.add_argument(
+        "--login", action="store_true",
+        help="sign in with a username and password instead of a printed "
+             "token, and enable the settings screen. The engine starts halted.",
+    )
+    serve.add_argument(
+        "--operators", help=f"the account file (default {DEFAULT_OPERATORS_FILE})"
+    )
     serve.set_defaults(func=cmd_serve)
+
+    # -- accounts ---------------------------------------------------------
+    for name, handler, summary in (
+        ("useradd", cmd_useradd, "create an account that can sign in"),
+        ("passwd", cmd_passwd, "change an account's password"),
+        ("userdel", cmd_userdel, "remove an account"),
+    ):
+        parser_ = subs.add_parser(name, help=summary)
+        parser_.add_argument("username")
+        parser_.add_argument("--operators")
+        parser_.add_argument(
+            "--stdin", action="store_true",
+            help="read the password from stdin instead of prompting. For "
+                 "scripts; a password on a command line is in the shell "
+                 "history and in ps output.",
+        )
+        if name == "useradd":
+            parser_.add_argument(
+                "--role", default="OPERATOR",
+                choices=["VIEWER", "OPERATOR", "OWNER"],
+                help="VIEWER watches; OPERATOR watches and stops; OWNER also "
+                     "configures and starts",
+            )
+        parser_.set_defaults(func=handler)
+
+    users = subs.add_parser("users", help="list the accounts that can sign in")
+    users.add_argument("--operators")
+    users.set_defaults(func=cmd_users)
 
     conformance = subs.add_parser(
         "conformance",

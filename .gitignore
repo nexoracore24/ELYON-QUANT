@@ -19,6 +19,11 @@ credentials*
 secrets*
 **/credentials/
 **/secrets/
+# Password hashes for the people who can start the engine. Not plaintext, but
+# committing them hands anyone with the repository an offline guessing run
+# against accounts that can place orders.
+operators.json
+operators*.json
 
 # Working output. Order journals record real order ids and prices, and live
 # session configs carry account settings; neither belongs in version control.

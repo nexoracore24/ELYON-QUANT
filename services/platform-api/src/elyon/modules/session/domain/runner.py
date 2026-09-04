@@ -71,7 +71,7 @@ from elyon.modules.trading.domain.position import (
     manage,
     open_position,
 )
-from elyon.shared_kernel.edcs.numeric import ZERO, dec
+from elyon.shared_kernel.edcs.numeric import ZERO, DeterminismError, dec
 
 from .config import Mode, SessionConfig
 
@@ -412,6 +412,67 @@ class TradingSession:
             self._committed_risk = ZERO
             self._reservation_id = None
         return decision
+
+    # -- reconfiguring ----------------------------------------------------
+
+    def reconfigure(self, config: SessionConfig) -> tuple[str, ...]:
+        """Swap the configuration of a session that is already running.
+
+        This is the domain's own check, and it is the one that matters: the
+        control surface decides what to *offer*, this decides what is
+        *possible*. Two things are refused outright.
+
+        **Anything a startup object was built around.** The candle builder is
+        cut for one symbol and one timeframe; the ATR is a running value over a
+        fixed window. Changing them mid-stream would not produce the new
+        configuration -- it would produce a hybrid that never existed, over
+        history that belongs to the old one.
+
+        **Anything that restates an open position.** Equity and the risk limits
+        are what a size was chosen against. Editing them while exposed does not
+        resize the trade; it only makes every figure reported about it wrong.
+
+        Returns the keys that actually changed, so the caller can record what
+        was done rather than that something was.
+        """
+        from .settings import FLAT_ONLY_KEYS, RESTART_KEYS, changed_keys
+
+        differences = changed_keys(self.config, config)
+        if not differences:
+            return ()
+
+        blocked = sorted(set(differences) & RESTART_KEYS)
+        if blocked:
+            raise DeterminismError(
+                f"{', '.join(blocked)} cannot change on a running session: the "
+                f"{len(self._candles)} bars already accumulated belong to the "
+                f"current value. Stop the session and start a new one."
+            )
+
+        if self._position is not None:
+            exposed = sorted(set(differences) & FLAT_ONLY_KEYS)
+            if exposed:
+                raise DeterminismError(
+                    f"{', '.join(exposed)} cannot change while a position is "
+                    f"open. The trade was sized against the current values; "
+                    f"changing them now would restate a decision already taken, "
+                    f"not revise it."
+                )
+
+        self.config = config
+
+        # The budget holds absolute amounts derived from equity. It is only
+        # rebuilt when flat, which the check above has already established.
+        if {"equity", "dailyLossLimit", "maxOpenRisk"} & set(differences):
+            self._budget = RiskBudget(
+                f"{self.config.symbol}-session",
+                {
+                    Dimension.DAILY_LOSS: self.config.risk.daily_loss_amount,
+                    Dimension.TOTAL_OPEN_RISK: self.config.risk.open_risk_amount,
+                },
+            )
+
+        return differences
 
     # -- reporting --------------------------------------------------------
 

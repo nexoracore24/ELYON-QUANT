@@ -60,13 +60,16 @@ def session_snapshot(session: Any) -> Mapping[str, Any]:
     return snapshot
 
 
-def live_panel_for(runner: Any, *, allow_resume: bool = False) -> ControlPanel:
+def live_panel_for(
+    runner: Any, *, allow_resume: bool = False, login: Any = None
+) -> ControlPanel:
     """Wire a *running* session to the control surface.
 
     Every read goes through the runner's lock. Reading the session directly
     while a feed thread is appending to it would hand a phone a snapshot of a
     state that never existed -- a candle half-added, a position half-written.
     """
+    from .control import live_control_for
     from .page import render_page
 
     def status() -> Mapping[str, Any]:
@@ -75,11 +78,11 @@ def live_panel_for(runner: Any, *, allow_resume: bool = False) -> ControlPanel:
         return snapshot
 
     def halt(reason: str) -> str:
-        runner.read(lambda s: s.oms.halt(reason))
+        runner.mutate(lambda s: s.oms.halt(reason))
         return f"halted: {reason}. Open positions are protected, not closed."
 
     def resume(reason: str) -> str:
-        runner.read(lambda s: s.oms.resume(reason))
+        runner.mutate(lambda s: s.oms.resume(reason))
         return f"resumed: {reason}"
 
     return ControlPanel(
@@ -87,17 +90,32 @@ def live_panel_for(runner: Any, *, allow_resume: bool = False) -> ControlPanel:
         halt=halt,
         resume=resume if allow_resume else None,
         page=render_page,
+        control=live_control_for(runner),
+        login=login,
     )
 
 
-def panel_for(session: Any, *, allow_resume: bool = False) -> ControlPanel:
+def panel_for(
+    session: Any,
+    *,
+    allow_resume: bool = False,
+    login: Any = None,
+    configurable: bool = False,
+) -> ControlPanel:
     """Wire a session to the control surface.
 
     ``allow_resume`` is False by default and is not something the phone can
     change. Restarting a halted engine from a device you carry is exactly the
     action the capability split exists to prevent, so the hook is simply absent
     unless someone starting the server chose otherwise.
+
+    ``configurable`` is the same decision for the settings screen. A panel that
+    only watches has no ``control``, so the configure routes answer 501 rather
+    than 403 -- "this engine does not do that" is a different fact from "you
+    may not", and conflating them sends people looking for a permission they
+    were never denied.
     """
+    from .control import control_for
     from .page import render_page
 
     def halt(reason: str) -> str:
@@ -113,4 +131,6 @@ def panel_for(session: Any, *, allow_resume: bool = False) -> ControlPanel:
         halt=halt,
         resume=resume if allow_resume else None,
         page=render_page,
+        control=control_for(session) if configurable else None,
+        login=login,
     )

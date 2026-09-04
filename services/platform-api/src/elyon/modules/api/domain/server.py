@@ -41,6 +41,13 @@ from .auth import (
 )
 
 LOCALHOST = "127.0.0.1"
+# The largest request this API has any use for. A strategy list and a handful
+# of decimals is a few hundred bytes.
+MAX_BODY_BYTES = 64 * 1024
+
+
+class Unavailable(Exception):
+    """A route that exists but was not wired up on this engine."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +70,11 @@ class ControlPanel:
     halt: Callable[[str], str]
     resume: Callable[[str], str] | None = None
     page: Callable[[], str] | None = None
+    # The configure-and-start half. Absent on a panel that only watches, and
+    # the routes that need it answer 501 rather than pretending: a control that
+    # returns a confusing error is worse than a control that is not there.
+    control: Any = None
+    login: Any = None
 
     def snapshot(self) -> Mapping[str, Any]:
         return self.status()
@@ -116,19 +128,31 @@ class Router:
         self.tokens = tokens
 
     def handle(
-        self, method: str, path: str, token: str | None, body: Mapping[str, Any]
+        self,
+        method: str,
+        path: str,
+        token: str | None,
+        body: Mapping[str, Any],
+        client: str = "unknown",
     ) -> Response:
         try:
-            return self._route(method, path, token, body)
+            return self._route(method, path, token, body, client)
         except Unauthorised as exc:
             return Response(401, {"error": str(exc)})
         except Forbidden as exc:
             return Response(403, {"error": str(exc)})
+        except Unavailable as exc:
+            return Response(501, {"error": str(exc)})
         except DeterminismError as exc:
             return Response(400, {"error": str(exc)})
 
     def _route(
-        self, method: str, path: str, token: str | None, body: Mapping[str, Any]
+        self,
+        method: str,
+        path: str,
+        token: str | None,
+        body: Mapping[str, Any],
+        client: str = "unknown",
     ) -> Response:
         # The page itself is unauthenticated: it is markup with no data in it,
         # and every figure it shows is fetched with a token afterwards. Gating
@@ -137,6 +161,37 @@ class Router:
             if self.panel.page is None:
                 return Response(404, {"error": "no page configured"})
             return Response(200, self.panel.page(), "text/html; charset=utf-8")
+
+        # -- signing in ---------------------------------------------------
+        # The only unauthenticated mutating route in the system, which is what
+        # it is for. Throttling lives in the login service rather than here:
+        # rate limiting that a second route could bypass is decoration.
+        if method == "POST" and path == "/api/login":
+            if self.panel.login is None:
+                return Response(
+                    501,
+                    {"error": "this engine has no accounts; it was started "
+                              "with a printed token instead"},
+                )
+            issued = self.panel.login.login(
+                body.get("username"), body.get("password"), client=client,
+            )
+            return Response(200, {
+                "token": issued.secret,
+                "label": issued.label,
+                "capabilities": sorted(c.value for c in issued.capabilities),
+                "canCommand": issued.can_command,
+                "expiresInSeconds": issued.seconds_remaining(),
+            })
+
+        if method == "POST" and path == "/api/logout":
+            if self.panel.login is None:
+                return Response(200, {"ok": True})
+            # No capability check and no 401 for an unknown token: logging out
+            # is only ever a reduction, and an error here would leave someone
+            # holding a credential they were trying to give up.
+            self.panel.login.logout(token)
+            return Response(200, {"ok": True})
 
         if method == "GET" and path == "/api/status":
             self.tokens.authorise(token, Capability.OBSERVE)
@@ -149,6 +204,8 @@ class Router:
                 "capabilities": sorted(c.value for c in granted.capabilities),
                 # So the page can hide controls it would only get a 403 from.
                 "canCommand": granted.can_command,
+                "expiresInSeconds": granted.seconds_remaining(),
+                "canConfigure": self.panel.control is not None,
             })
 
         if method == "POST" and path == "/api/halt":
@@ -172,7 +229,54 @@ class Router:
             return Response(200, {"halted": False,
                                   "message": self.panel.resume(reason)})
 
+        # -- configuring and starting -------------------------------------
+
+        if method == "GET" and path == "/api/config":
+            # Readable with OBSERVE on purpose. Seeing what the engine is set
+            # to is not a privilege -- and a viewer who cannot see the settings
+            # cannot tell whether what they are watching is what they think.
+            self.tokens.authorise(token, Capability.OBSERVE)
+            return Response(200, to_jsonable(self._control().settings()))
+
+        if method == "POST" and path == "/api/config":
+            granted = self.tokens.authorise(token, Capability.COMMAND)
+            changes = body.get("changes")
+            if not isinstance(changes, Mapping):
+                return Response(400, {"error": "changes must be an object"})
+            return Response(200, to_jsonable(self._control().apply(
+                changes,
+                who=granted.label,
+                confirmation=str(body.get("confirm") or ""),
+            )))
+
+        if method == "GET" and path == "/api/preflight":
+            self.tokens.authorise(token, Capability.OBSERVE)
+            return Response(200, to_jsonable(self._control().preflight().to_dict()))
+
+        if method == "POST" and path == "/api/start":
+            # The asymmetry, once more: stopping is PROTECT, starting is
+            # COMMAND. Login does not soften it -- it just gives it a name.
+            granted = self.tokens.authorise(token, Capability.COMMAND)
+            result = self._control().start(
+                who=granted.label, force=bool(body.get("force")),
+            )
+            return Response(200 if result["started"] else 409, to_jsonable(result))
+
+        if method == "POST" and path == "/api/stop":
+            granted = self.tokens.authorise(token, Capability.PROTECT)
+            return Response(200, to_jsonable(self._control().stop(
+                who=granted.label, reason=str(body.get("reason") or ""),
+            )))
+
         return Response(404, {"error": f"no route for {method} {path}"})
+
+    def _control(self) -> Any:
+        if self.panel.control is None:
+            raise Unavailable(
+                "this engine was started without a control surface; "
+                "configuring and starting are console actions here"
+            )
+        return self.panel.control
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -189,6 +293,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _body(self) -> Mapping[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
+            return {}
+        if length > MAX_BODY_BYTES:
+            # Nothing this API accepts is large. An unbounded read on an
+            # unauthenticated route is a way to exhaust the memory of a machine
+            # that is holding a position.
             return {}
         try:
             parsed = json.loads(self.rfile.read(length) or b"{}")
@@ -219,14 +328,28 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _client(self) -> str:
+        """Who is asking, for throttling purposes.
+
+        The socket's own address, never a forwarded header. ``X-Forwarded-For``
+        is set by the client unless a proxy you control overwrites it, so
+        trusting it here would let anyone rotate their way out of a rate limit
+        by typing a different number.
+        """
+        return self.client_address[0] if self.client_address else "unknown"
+
     def do_GET(self) -> None:  # noqa: N802 -- stdlib naming
         path = urlparse(self.path).path
-        self._respond(self.router.handle("GET", path, self._token(), {}))
+        self._respond(
+            self.router.handle("GET", path, self._token(), {}, self._client())
+        )
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
         self._respond(
-            self.router.handle("POST", path, self._token(), self._body())
+            self.router.handle(
+                "POST", path, self._token(), self._body(), self._client()
+            )
         )
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -247,10 +370,14 @@ def build_server(
     config: ServerConfig | None = None,
 ) -> ThreadingHTTPServer:
     settings = config or ServerConfig()
-    if len(tokens) == 0:
+    # An empty registry is correct when people sign in -- sessions are minted
+    # by the login route, not configured ahead of time. It is a bug when they
+    # do not, so the two cases are distinguished rather than merged.
+    if len(tokens) == 0 and panel.login is None:
         raise DeterminismError(
-            "no tokens configured; the server would refuse every request. "
-            "Issue one with `elyon serve`, which prints it once."
+            "no tokens and no accounts configured; the server would refuse "
+            "every request. Either let `elyon serve` print a token, or create "
+            "an operator with `elyon useradd` and start with --login."
         )
 
     handler = type("ElyonHandler", (_Handler,), {"router": Router(panel, tokens)})

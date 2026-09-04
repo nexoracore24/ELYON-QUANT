@@ -1,4 +1,4 @@
-.PHONY: help test install demo strategies dna run calibrate
+.PHONY: help test install demo strategies dna run calibrate app useradd users
 
 API := services/platform-api
 
@@ -16,6 +16,10 @@ help:
 	@echo "    make config > session.json"
 	@echo "    make run CONFIG=session.json DATA=bars.csv"
 	@echo "    make calibrate DATA=bars.csv STRATEGY=SIX_PILLARS"
+	@echo ""
+	@echo "  The app (login, settings, start):"
+	@echo "    make useradd USER=owner ROLE=OWNER"
+	@echo "    make app CONFIG=session.json DATA=bars.csv"
 
 install:
 	pip3 install --quiet pytest
@@ -43,3 +47,19 @@ calibrate:
 	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli calibrate \
 		--data $(abspath $(DATA)) --strategy $(or $(STRATEGY),SIX_PILLARS) \
 		--sample $(or $(SAMPLE),IN_SAMPLE)
+
+# The app: sign in, configure, start. The engine comes up halted -- starting is
+# an action somebody takes after looking at the settings, not a default.
+app:
+	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli serve --login \
+		--config $(abspath $(CONFIG)) --data $(abspath $(DATA)) \
+		--operators $(abspath $(or $(OPERATORS),operators.json)) $(FLAGS)
+
+useradd:
+	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli useradd $(USER) \
+		--role $(or $(ROLE),OPERATOR) \
+		--operators $(abspath $(or $(OPERATORS),operators.json))
+
+users:
+	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli users \
+		--operators $(abspath $(or $(OPERATORS),operators.json))

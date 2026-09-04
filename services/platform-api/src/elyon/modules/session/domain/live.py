@@ -211,6 +211,18 @@ class LiveRunner:
         with self.lock:
             return view(self.session)
 
+    def mutate(self, action: Callable[[TradingSession], Any]) -> Any:
+        """Change the session safely.
+
+        The same lock as :meth:`read`, under a name that says what the caller
+        is doing. Halting, resuming and reconfiguring all arrive from the
+        control surface while the feed thread is mid-bar, and a configuration
+        swapped halfway through an evaluation is a bar decided under two
+        different sets of rules.
+        """
+        with self.lock:
+            return action(self.session)
+
     def health(self) -> Mapping[str, Any]:
         with self.lock:
             return {

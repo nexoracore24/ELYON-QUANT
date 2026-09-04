@@ -15,8 +15,19 @@ from .live import (
     TickFeed,
 )
 from .runner import BarOutcome, TradingSession
+from .settings import (
+    SETTINGS,
+    Kind,
+    Scope,
+    Setting,
+    apply_changes,
+    changed_keys,
+    describe,
+)
 
 __all__ = [
-    "BarOutcome", "FeedState", "LiveConfig", "LiveRunner", "Mode",
-    "ReplayFeed", "RiskSettings", "SessionConfig", "TickFeed", "TradingSession",
+    "SETTINGS", "BarOutcome", "FeedState", "Kind", "LiveConfig",
+    "LiveRunner", "Mode", "ReplayFeed", "RiskSettings", "Scope",
+    "SessionConfig", "Setting", "TickFeed", "TradingSession",
+    "apply_changes", "changed_keys", "describe",
 ]

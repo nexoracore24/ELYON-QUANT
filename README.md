@@ -11,7 +11,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
 > ejecutable con log persistente, adaptador MT5/Exness y control desde el
-> móvil, con **869 tests** verdes.
+> móvil, con **975 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 869 tests
+make test                           # 975 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -131,6 +131,17 @@ make run CONFIG=session.json DATA=bars.csv FLAGS="--journal orders.jsonl"
 Append-only, una línea JSON por evento, `fsync` por defecto. Un proceso que
 muere a mitad de un envío vuelve, reproduce el log y sabe exactamente qué había
 hecho — y `recover()` le pregunta al broker qué pasó mientras estaba muerto.
+
+**8. Ábrelo desde el móvil.**
+
+```bash
+elyon useradd owner --role OWNER          # una vez, en la máquina
+elyon serve --config session.json --data bars.csv --login
+```
+
+Entras con usuario y contraseña, ves en qué etapa se paró cada vela, ajustas
+riesgo y estrategias, y arrancas. El motor **arranca parado**: «Arrancar» tiene
+que ser una acción de verdad, no decoración.
 
 ---
 
@@ -500,7 +511,9 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
 | `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio | ✅ |
-| `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, página móvil | ✅ |
+| `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, app móvil | ✅ |
+| `api/accounts` | Login: PBKDF2 de stdlib, roles→capacidades, throttling por IP y cuenta, sesiones que caducan y se revocan | ✅ |
+| `api/control` | Ajustes remotos con alcance (live / flat-only / restart), preflight, arranque registrado | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
@@ -514,7 +527,9 @@ calibrar nunca opera sola · añadir una estrategia nunca mejora un setup
 existente · truncar el futuro no cambia el pasado · un backtest in-sample no
 certifica nada · el riesgo tiene la última palabra · toda decisión se explica desde
 su propio registro · un feed caído para el motor sin cerrar posiciones · ningún
-lector ve una sesión a medio escribir.
+lector ve una sesión a medio escribir · un ajuste no puede reescribir una
+posición ya puesta · una configuración se aplica entera o no se aplica · quien
+puede parar no puede arrancar.
 
 ---
 
@@ -547,37 +562,153 @@ contexto** (Market Context Engine).
 
 ---
 
-## Control desde el móvil
+## La app: login, ajustes y arrancar
 
 **El bot no corre en el móvil.** `MetaTrader5` es solo Windows y necesita el
 terminal abierto. La arquitectura real es motor en un VPS Windows 24/7, y el
 móvil como **mando a distancia**.
 
+**1. Crea tu cuenta**, en la máquina, una vez:
+
 ```bash
-elyon serve --config session.json --data bars.csv          # solo mirar
-elyon serve --config session.json --data bars.csv --live   # + feed en vivo
+elyon useradd owner --role OWNER
 ```
+
+No hay login por defecto. Una credencial por defecto en algo que puede mandar
+órdenes no es una comodidad, es una donación.
+
+**2. Arranca el servidor con login:**
+
+```bash
+elyon serve --config session.json --data bars.csv --login --live
+```
+
+El motor arranca **parado**. «Arrancar» tiene que ser una acción de verdad o es
+decoración — y una app cuya primera pantalla muestra el motor ya operando no le
+da a nadie la oportunidad de revisar los ajustes antes.
+
+**3. Entra desde el móvil** y tienes tres pestañas:
+
+| Pestaña | Qué hay |
+|---|---|
+| **Estado** | Si está operando, qué tiene abierto, y **en qué etapa se paró** cada vela |
+| **Ajustes** | Cada ajuste, su valor, y si se puede tocar ahora mismo |
+| **Arrancar** | El preflight, y el botón |
+
+Y **Parar** siempre visible, nunca detrás de una pestaña.
+
+### La contraseña no es la credencial de la API
+
+Entrar **cambia** la contraseña por un token de sesión, y es el token el que
+viaja después. La contraseña cruza la red una vez por sesión en vez de cada cinco
+segundos, y lo que queda en el navegador **caduca solo**: 12h absolutas, 30min de
+inactividad.
+
+Una contraseña no se puede retirar. Una sesión sí — que es justo lo que quieres
+después de perder el móvil.
+
+Detrás: PBKDF2-HMAC-SHA256 con 600.000 iteraciones y sal por cuenta, de la
+librería estándar. El número de iteraciones va **dentro** del hash, así que subir
+el coste mañana no invalida las contraseñas de hoy.
+
+### Adivinar cuesta, y el coste se dobla
+
+Un formulario de login en un motor de trading que contesta al instante es un
+formulario que merece la pena adivinar. Dos contadores:
+
+- **Por IP, estricto** (5 intentos). El atacante controla su propia dirección:
+  ralentizarla le cuesta a él.
+- **Por cuenta, generoso** (50). Porque **un bloqueo por cuenta apretado es una
+  denegación de servicio que cualquiera puede apuntarte**: fallan tu login cinco
+  veces y no llegas a tu propio motor con una posición abierta.
+
+Y usuario incorrecto y contraseña incorrecta dan **el mismo mensaje y tardan lo
+mismo** — la rama del usuario inexistente gasta el mismo hashing y lo tira. Si no,
+el formulario es un enumerador de cuentas.
 
 ### Parar es seguro. Arrancar no.
 
-Exponer el motor al móvil es exponerlo a **quien tenga el token**. Un móvil
-robado debería poder **parar** el bot — molesto, nada más. No debería poder
-reanudarlo, subir el riesgo ni cambiar a LIVE. Por eso las capacidades se
-gradúan por **hacia dónde mueven el riesgo**:
+Un móvil robado debería poder **parar** el bot — molesto, nada más. No debería
+poder reanudarlo, subir el riesgo ni cambiar a LIVE. Por eso las capacidades se
+gradúan por **hacia dónde mueven el riesgo**, y los roles son nombres para esas
+capacidades, no una idea nueva:
 
-| Capacidad | Qué permite | ¿La tiene el móvil? |
+| Rol | Capacidades | Qué puede |
 |---|---|---|
-| `OBSERVE` | Mirar | ✅ |
-| `PROTECT` | Parar, aplanar — solo **reduce** exposición | ✅ |
-| `COMMAND` | Reanudar, reconfigurar — solo **aumenta** | ❌ |
+| `VIEWER` | `OBSERVE` | Mirar |
+| `OPERATOR` | `+ PROTECT` | Parar — solo **reduce** exposición |
+| `OWNER` | `+ COMMAND` | Arrancar, reconfigurar — solo **aumenta** |
 
-`COMMAND` no es un flag: es una función distinta (`command_token()`), para que
-concederlo sea algo escrito y no algo por defecto. Y el hook de reanudar **ni se
-cablea** salvo que arranques con `--allow-command`.
+**El login no ablanda la asimetría, le pone nombre.** Un OPERATOR para el motor a
+las 3am desde el móvil; solo un OWNER lo arranca.
 
-**No hay botón de arrancar en la página.** Pintar un control que solo devolvería
-403 enseña a ignorar errores. El de parar pide dos toques —un bolsillo está
-lleno de toques accidentales— y el armado caduca a los 4 segundos.
+Y a quien no puede arrancar **no se le pinta el botón**, no se le rechaza:
+un control que siempre devuelve 403 enseña a ignorar errores. El de parar pide
+dos toques —un bolsillo está lleno de toques accidentales— y el armado caduca a
+los 4 segundos.
+
+### Qué puedes cambiar, y cuándo
+
+Un fichero de configuración se edita con todo parado, así que todos los ajustes
+son igual de seguros. Un motor vivo no es así. Cada ajuste declara un **alcance**:
+
+| Alcance | Cuándo | Por qué |
+|---|---|---|
+| 🟢 `LIVE` | En la siguiente vela | Solo afecta a lo que venga después |
+| 🟡 `FLAT_ONLY` | Solo sin posición abierta | Cambia lo que un número *significa* |
+| 🔴 `RESTART` | Sesión nueva | El histórico acumulado pertenece al valor viejo |
+
+El caso que lo justifica: si una posición se dimensionó contra 10.000 € y un
+0,5% de riesgo, **editar el equity a 50.000 € con la posición abierta no la
+redimensiona** — solo convierte en mentira cada número que se reporta sobre ella.
+Eso no es reconfigurar, es reescribir el significado de una operación ya puesta.
+
+Igual con el símbolo o el timeframe: el constructor de velas está cortado para
+uno, el ATR es un valor corriente sobre una ventana fija. Cambiarlos en caliente
+no da la configuración nueva, da **un híbrido que nunca existió**.
+
+La tabla vive en el dominio y `TradingSession.reconfigure()` es quien decide de
+verdad. La app decide qué *ofrecer*; solo puede rechazar antes, nunca permitir lo
+que el dominio prohíbe. Y **un cambio rechazado no deja nada a medias**: la
+configuración se construye y valida entera antes de intercambiar nada.
+
+### Pasar a LIVE se escribe, no se pulsa
+
+```
+Switching to LIVE sends orders to a real broker.
+Type TRADE REAL MONEY to confirm.
+```
+
+Cualquier otro ajuste se deshace volviéndolo a poner. Este no: una orden que
+llegó a un broker real no se deshace cambiando el modo después. Salir de LIVE, en
+cambio, no pide ceremonia — todas las salvaguardas apuntan a que **reducir riesgo
+sea fácil**.
+
+### Arrancar se comprueba, no solo se permite
+
+```
+✓ broker      PaperBroker
+✕ calibration every live strategy is uncalibrated (SIX_PILLARS); none of them
+              can open a trade alone, so this session will take no trades
+! calendar    no economic calendar; the context score cannot exceed 92/100
+```
+
+Pulsar Start en un motor que no puede operar produce **un bot que parece sano y
+no hace nada** — el fallo con el que más tiempo se pierde. La frontera entre
+bloqueante y aviso es una pregunta: *¿arrancar sería un error o solo silencio?*
+LIVE apuntando a un broker de papel es un error. PAPER sin calibrar es silencio,
+y el silencio es exactamente cómo una estrategia se gana un tier.
+
+Hay un `force`, porque una comprobación puede equivocarse y un motor que no
+arranca es peor que uno que avisa. Queda **registrado** cuando se usa: «lo
+forzamos» es la primera pregunta después de un mal día.
+
+### Cada cambio queda con un nombre encima
+
+Un cambio de configuración es tan consecuente como una orden: decide cómo será
+cada orden posterior. El registro dice quién cambió qué, y de qué a qué.
+«Debíamos estar corriendo con otros ajustes» no es una explicación que nadie
+pueda comprobar seis meses después.
 
 ### Lo que no viaja al móvil
 
@@ -592,7 +723,11 @@ Ponlo detrás de **Tailscale** o un túnel SSH. `--host 0.0.0.0` te avisa a
 gritos, y **no hay TLS aquí a propósito**: un TLS a medias parece terminado y es
 peor que ninguno.
 
-📄 **[Guía completa: control desde el móvil](docs/07-operations/mobile-control.md)**
+Con login esto importa más, no menos: un formulario sobre HTTP plano expuesto a
+internet **entrega la contraseña**. El túnel no es opcional.
+
+📄 **[Guía completa: control desde el móvil](docs/07-operations/mobile-control.md)** ·
+📄 **[ADR-0013: login y configuración remota](docs/adr/0013-login-and-remote-configuration.md)**
 
 ---
 

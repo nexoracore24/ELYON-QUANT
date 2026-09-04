@@ -101,7 +101,8 @@ class TestStoppingIsSafeStartingIsNot:
         response = router_with(token, allow_resume=True).handle(
             "POST", "/api/resume", token.secret, {}
         )
-        assert "stay on the machine" in response.body["error"]
+        assert "only an OWNER holds" in response.body["error"]
+        assert "Stopping does not" in response.body["error"]
 
     def test_resume_is_absent_unless_deliberately_enabled(self):
         # Not merely refused -- the hook is not wired at all.
@@ -313,7 +314,7 @@ class TestBinding:
 
     def test_a_server_without_tokens_is_refused(self):
         # It would refuse every request; failing at startup says why.
-        with pytest.raises(DeterminismError, match="no tokens configured"):
+        with pytest.raises(DeterminismError, match="no tokens and no accounts"):
             build_server(ControlPanel(status=dict, halt=lambda r: ""),
                          TokenRegistry())
 
@@ -331,14 +332,22 @@ class TestThePage:
         assert "https://" not in page
         assert "cdn" not in page.lower()
 
-    def test_stopping_is_the_only_control(self):
+    def test_stopping_is_never_behind_a_tab(self):
         page = render_page()
         assert "Stop trading" in page
-        # No start button: resuming needs COMMAND, which a phone lacks, and
-        # rendering a control that only ever 403s teaches people to ignore
-        # errors.
-        assert "Start trading" not in page
-        assert "Resume" not in page
+        # The stop button is positioned outside every tab panel, so no
+        # navigation state can hide the one control that is always safe.
+        assert 'class="stop" id="stop"' in page
+        assert page.index('id="stop"') > page.index('<nav>')
+
+    def test_start_is_hidden_from_an_account_that_cannot_start(self):
+        # There is a Start button now -- an owner has to be able to start the
+        # engine from the app. It is hidden rather than merely refused for
+        # anyone else: a control that only ever 403s teaches people to ignore
+        # errors. The API refuses it regardless; this is the second layer.
+        page = render_page()
+        assert "'hidden', !me.canCommand" in page
+        assert "canCommand" in page
 
     def test_it_asks_for_confirmation_before_halting(self):
         # A pocket is full of accidental single taps.
@@ -352,7 +361,10 @@ class TestThePage:
     def test_the_token_stays_in_the_browser(self):
         page = render_page()
         assert "localStorage" in page
-        assert "Kept in this browser only" in page
+        # What is stored is a session that expires, not the password. The
+        # password field is cleared the moment it has been exchanged.
+        assert "never stored on this device" in page
+        assert "$('password').value = '';" in page
 
     def test_it_is_mobile_first(self):
         page = render_page()
