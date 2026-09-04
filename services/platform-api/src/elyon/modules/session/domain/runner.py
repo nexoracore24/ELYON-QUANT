@@ -35,6 +35,8 @@ from elyon.modules.execution.domain import (
 from elyon.modules.market_context.domain import (
     MarketContext,
     MarketDna,
+    NewsCalendar,
+    ScheduledCalendar,
     profile_for,
     read_context,
 )
@@ -113,6 +115,7 @@ class TradingSession:
     # Where the order log survives a restart. In-memory is right for a backtest
     # and wrong for anything that can hold a position overnight.
     store: EventStore | None = None
+    calendar: NewsCalendar | None = None
 
     _builder: CandleBuilder = field(init=False)
     _atr: AtrProvider = field(init=False)
@@ -141,6 +144,8 @@ class TradingSession:
             self.broker = PaperBroker(self.clock)
         if self.store is None:
             self.store = InMemoryEventStore()
+        if self.calendar is None and self.config.calendar_path:
+            self.calendar = ScheduledCalendar.load(self.config.calendar_path)
         self._oms = Oms(self.broker, self.clock, store=self.store)
         self._budget = RiskBudget(
             f"{self.config.symbol}-session",
@@ -220,6 +225,7 @@ class TradingSession:
         if not self.config.skip_context_gate:
             context = read_context(
                 series, atr, self.dna,
+                calendar=self.calendar,
                 config=self.config.context,
                 previous=self._last_context,
             )

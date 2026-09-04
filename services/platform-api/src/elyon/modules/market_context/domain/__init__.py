@@ -10,6 +10,14 @@ Market DNA supplies the per-instrument thresholds every reading is expressed in.
 Its inviolable rule: **DNA adapts filters, never rules.**
 """
 
+from .calendar import (
+    INSTRUMENT_CURRENCIES,
+    BlackoutPolicy,
+    Event,
+    Impact,
+    ScheduledCalendar,
+    currencies_for,
+)
 from .context import (
     CONTEXT_WEIGHTS,
     DEFAULT_HYSTERESIS,
@@ -46,7 +54,8 @@ from .regime import (
 )
 
 __all__ = [
-    "AssetClass", "CONTEXT_WEIGHTS", "ContextBand", "ContextConfig",
+    "AssetClass", "BlackoutPolicy", "CONTEXT_WEIGHTS", "Event", "Impact",
+    "INSTRUMENT_CURRENCIES", "ScheduledCalendar", "currencies_for", "ContextBand", "ContextConfig",
     "ContextFactor", "ContextVeto", "DEFAULT_HYSTERESIS", "DEFAULT_THRESHOLD",
     "ENGINE_DEFAULTS", "FactorReading", "GateResult", "MIN_DNA_SAMPLE",
     "MarketContext", "MarketDna", "MarketRegime", "NewsCalendar", "NoCalendar",

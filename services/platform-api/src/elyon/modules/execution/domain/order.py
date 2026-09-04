@@ -118,6 +118,11 @@ TRANSITIONS: Final[Mapping[EventKind, Mapping[OrderState, OrderState]]] = {
         OrderState.ACKNOWLEDGED: OrderState.CANCELLED,
         OrderState.RECOVERY: OrderState.CANCELLED,
     },
+    # Withdrawing the remainder leaves the order where it is: it still holds a
+    # position, and a position is not an outcome. Only closing it is.
+    EventKind.REMAINDER_CANCELLED: {
+        OrderState.PARTIALLY_FILLED: OrderState.FILLED,
+    },
     EventKind.EXPIRED: {
         OrderState.QUEUED: OrderState.EXPIRED,
         OrderState.SENT: OrderState.EXPIRED,
@@ -227,6 +232,9 @@ class Order:
     fills: tuple[Fill, ...] = ()
     broker_order_id: str | None = None
     send_attempts: int = 0
+    # Quantity withdrawn rather than filled. Tracked separately so the order
+    # can be complete without pretending it filled what it never did.
+    cancelled_quantity: Decimal = ZERO
     # Broker event ids already folded in, so a redelivered report is a no-op.
     seen_broker_events: frozenset[str] = frozenset()
 
@@ -248,11 +256,18 @@ class Order:
 
     @property
     def remaining_quantity(self) -> Decimal:
-        return self.request.quantity - self.filled_quantity
+        return (
+            self.request.quantity - self.filled_quantity - self.cancelled_quantity
+        )
 
     @property
     def is_fully_filled(self) -> bool:
         return self.filled_quantity >= self.request.quantity
+
+    @property
+    def is_complete(self) -> bool:
+        """Nothing left working: every unit either filled or was withdrawn."""
+        return self.remaining_quantity <= ZERO
 
     @property
     def average_fill_price(self) -> Decimal | None:
@@ -322,6 +337,10 @@ class Order:
 
         if event.kind is EventKind.SENT:
             updates["send_attempts"] = self.send_attempts + 1
+        if event.kind is EventKind.REMAINDER_CANCELLED:
+            updates["cancelled_quantity"] = (
+                self.cancelled_quantity + event.quantity
+            )
         if event.kind is EventKind.ACKNOWLEDGED:
             updates["broker_order_id"] = event.payload.get(
                 "brokerOrderId", self.broker_order_id

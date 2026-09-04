@@ -107,8 +107,19 @@ class TestWarningsAreHandedOver:
         warnings = config(calibrations={}).warnings()
         assert any("take no trades" in w for w in warnings)
 
-    def test_a_calibrated_session_warns_about_nothing(self):
-        assert config().warnings() == ()
+    def test_a_calibrated_session_still_flags_the_missing_calendar(self):
+        # Calibration silences the tier warning; the absent news feed is a
+        # separate gap and stays visible.
+        warnings = config().warnings()
+        assert not any("no calibration" in w for w in warnings)
+        assert any("no economic calendar" in w for w in warnings)
+
+    def test_the_calendar_warning_names_the_ceiling(self):
+        # Eight points that cannot be earned is worth saying out loud.
+        assert any("92/100" in w for w in config().warnings())
+
+    def test_a_fully_configured_session_warns_about_nothing(self):
+        assert config(calendar_path="calendar.csv").warnings() == ()
 
     def test_live_mode_says_so(self):
         assert any("real broker" in w for w in config(mode=Mode.LIVE).warnings())
@@ -283,7 +294,7 @@ class TestCalibrationsInConfig:
         from elyon.modules.strategy.domain import ProbabilityTier
         assert cfg.playbook().tier_of(StrategyId.SIX_PILLARS) \
             is ProbabilityTier.HIGH
-        assert cfg.warnings() == ()
+        assert not any("no calibration" in w for w in cfg.warnings())
 
     def test_the_config_supplies_a_sample_not_a_tier(self):
         # A configuration file cannot claim a tier it did not earn: it gives

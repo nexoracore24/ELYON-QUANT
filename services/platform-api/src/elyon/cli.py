@@ -9,6 +9,7 @@ system that stops starting one day.
     elyon config > session.json   a starting configuration
     elyon run --config c.json --data bars.csv
     elyon calibrate --data bars.csv --strategy SIX_PILLARS
+    elyon conformance --adapter mybroker:build
 """
 
 from __future__ import annotations
@@ -38,7 +39,12 @@ from elyon.modules.market_context.domain import (
 )
 from elyon.modules.market_data.domain.model import Candle, CandleState, Timeframe
 from elyon.modules.market_data.domain.series import CandleSeries
-from elyon.modules.execution.domain import JsonlEventStore
+from elyon.modules.execution.domain import (
+    JsonlEventStore,
+    ManualClock,
+    PaperBroker,
+    check_adapter,
+)
 from elyon.modules.session.domain import Mode, SessionConfig, TradingSession
 from elyon.modules.strategy.domain import (
     CATALOG,
@@ -287,6 +293,30 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_conformance(args: argparse.Namespace) -> int:
+    """Check a broker adapter against the OMS's safety contract."""
+    if args.adapter:
+        module_name, _, attribute = args.adapter.rpartition(":")
+        if not module_name:
+            print(
+                "error: --adapter takes module:factory, e.g. "
+                "myvenue.adapter:build",
+                file=sys.stderr,
+            )
+            return EXIT_ERROR
+        import importlib
+
+        factory = getattr(importlib.import_module(module_name), attribute)
+    else:
+        print("No --adapter given; checking the built-in paper broker as a "
+              "demonstration of what a passing report looks like.\n")
+        factory = lambda clock: PaperBroker(clock)  # noqa: E731
+
+    report = check_adapter(factory, ManualClock(), symbol=args.symbol)
+    print(report)
+    return EXIT_OK if report.safe_to_use else EXIT_ERROR
+
+
 def cmd_demo(args: argparse.Namespace) -> int:
     import demo_pipeline
 
@@ -340,6 +370,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="IN_SAMPLE runs are measured but never certified",
     )
     calibrate.set_defaults(func=cmd_calibrate)
+
+    conformance = subs.add_parser(
+        "conformance",
+        help="check a broker adapter against the OMS's safety contract",
+    )
+    conformance.add_argument(
+        "--adapter",
+        help="module:factory returning a BrokerAdapter, e.g. myvenue:build. "
+             "Omit to check the built-in paper broker.",
+    )
+    conformance.add_argument("--symbol", default="EURUSD")
+    conformance.set_defaults(func=cmd_conformance)
 
     subs.add_parser("demo", help="run the end-to-end demonstration").set_defaults(
         func=cmd_demo

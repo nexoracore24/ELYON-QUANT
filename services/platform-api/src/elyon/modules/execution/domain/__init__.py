@@ -38,6 +38,7 @@ from .ports import (
     Clock,
     ManualClock,
 )
+from .conformance import Check, ConformanceReport, check_adapter
 from .store import (
     CorruptLog,
     EventStore,
@@ -55,7 +56,7 @@ from .resilience import (
 )
 
 __all__ = [
-    "BreakerState", "BrokerAck", "CorruptLog", "EventStore",
+    "BreakerState", "BrokerAck", "Check", "ConformanceReport", "check_adapter", "CorruptLog", "EventStore",
     "InMemoryEventStore", "JsonlEventStore", "LoadedLog", "BrokerAdapter", "BrokerError",
     "BrokerErrorKind", "BrokerOrderState", "CircuitBreaker", "Clock",
     "DeadLetter", "DeadLetterQueue", "EventKind", "Fill", "IllegalTransition",

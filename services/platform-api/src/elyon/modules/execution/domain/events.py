@@ -61,6 +61,9 @@ class EventKind(str, Enum):
     FILLED = "FILLED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
+    # The unfilled part of a partial fill withdrawn. Deliberately not CANCELLED:
+    # the order still carries a position, so its outcome is not sealed.
+    REMAINDER_CANCELLED = "REMAINDER_CANCELLED"
     EXPIRED = "EXPIRED"
     FAILED = "FAILED"
     RECOVERY_STARTED = "RECOVERY_STARTED"

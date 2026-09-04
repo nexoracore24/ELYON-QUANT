@@ -250,7 +250,62 @@ class Oms:
         return self._emit(coid, EventKind.REJECTED, reason=reason)
 
     def cancel(self, coid: str, reason: str = "cancelled") -> Order:
+        """Cancel an order outright.
+
+        Only possible while nothing has filled. An order carrying a position
+        cannot be cancelled -- the position is still live and needs managing,
+        and a terminal state would lose it. To withdraw the unfilled part of a
+        partial fill, use :meth:`cancel_remainder`.
+        """
+        order = self.order(coid)
+        if order.state is OrderState.PARTIALLY_FILLED:
+            raise IllegalTransition(
+                f"{coid} has filled {order.filled_quantity} of "
+                f"{order.request.quantity}; cancelling would discard a live "
+                f"position. Use cancel_remainder() to withdraw the unfilled "
+                f"{order.remaining_quantity}."
+            )
         return self._emit(coid, EventKind.CANCELLED, reason=reason)
+
+    def cancel_remainder(
+        self, coid: str, reason: str = "remainder withdrawn"
+    ) -> Order:
+        """Withdraw the unfilled part of a partially filled order.
+
+        A distinct operation from cancelling, and a distinct event. The order
+        becomes complete -- nothing is still working at the venue -- but it is
+        not "cancelled": it holds a position, and that position still has to be
+        managed and closed. Conflating the two would seal the outcome of a
+        trade that has not finished.
+        """
+        order = self.order(coid)
+        if order.state is not OrderState.PARTIALLY_FILLED:
+            raise IllegalTransition(
+                f"{coid} is {order.state.value}; there is no partial fill "
+                f"whose remainder could be withdrawn"
+            )
+
+        remaining = order.remaining_quantity
+        try:
+            self.adapter.cancel(coid)
+        except BrokerError as exc:
+            # The venue may still fill it. Recording a withdrawal we could not
+            # achieve would leave the OMS blind to a fill that then arrives.
+            self.dlq.add(
+                OrderEvent(
+                    kind=EventKind.REMAINDER_CANCELLED, client_order_id=coid,
+                    at_ns=self.clock.now_ns(), quantity=remaining,
+                ),
+                reason=f"venue refused the cancel ({exc}); the remainder may "
+                       f"still fill",
+                at_ns=self.clock.now_ns(),
+            )
+            return order
+
+        return self._emit(
+            coid, EventKind.REMAINDER_CANCELLED,
+            quantity=remaining, reason=reason,
+        )
 
     # -- sending ----------------------------------------------------------
 

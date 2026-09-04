@@ -116,6 +116,9 @@ class SessionConfig:
     # Deliberate escape hatches, each of which has to be asked for by name.
     allow_uncalibrated_live: bool = False
     skip_context_gate: bool = False
+    # Path to an economic calendar. Without one, NEWS_CLEAR is withheld and the
+    # context score is capped at 92/100 -- the missing feed stays visible.
+    calendar_path: str | None = None
 
     def __post_init__(self) -> None:
         if self.warmup_bars < self.atr_period:
@@ -190,6 +193,12 @@ class SessionConfig:
                 "the context gate is disabled; the engine will look for entries "
                 "in any market condition"
             )
+        if self.calendar_path is None:
+            notes.append(
+                "no economic calendar configured; news risk is unknown, so "
+                "NEWS_CLEAR is withheld and the context score cannot exceed "
+                "92/100"
+            )
         if self.mode.touches_real_money:
             notes.append("LIVE mode: orders will reach a real broker")
         return tuple(notes)
@@ -223,6 +232,7 @@ class SessionConfig:
             "trailFromR": str(self.management.trail_from_r),
             "partialAtR": str(self.management.partial_at_r),
             "skipContextGate": self.skip_context_gate,
+            "calendar": self.calendar_path or "",
         }
 
     @property
@@ -243,7 +253,7 @@ class SessionConfig:
             "symbol", "mode", "timeframe", "strategies", "shadowStrategies",
             "conflictPolicy", "risk", "atrPeriod", "swingGrade", "warmupBars",
             "lookbackBars", "entryScoreThreshold", "allowUncalibratedLive",
-            "skipContextGate", "management", "calibrations",
+            "skipContextGate", "management", "calibrations", "calendar",
         }
         unknown = set(raw) - known
         if unknown:
@@ -296,6 +306,7 @@ class SessionConfig:
             warmup_bars=int(raw.get("warmupBars", 40)),
             lookback_bars=int(raw.get("lookbackBars", 120)),
             entry_score_threshold=raw.get("entryScoreThreshold"),
+            calendar_path=raw.get("calendar"),
             allow_uncalibrated_live=bool(raw.get("allowUncalibratedLive", False)),
             skip_context_gate=bool(raw.get("skipContextGate", False)),
         )

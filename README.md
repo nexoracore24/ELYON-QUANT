@@ -10,7 +10,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
-> ejecutable con log persistente, con **710 tests** verdes.
+> ejecutable con log persistente, con **760 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -28,7 +28,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 710 tests
+make test                           # 760 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -104,7 +104,24 @@ reclamar un tier que no midió: las mismas reglas lo derivan en todas partes, as
 que 180 operaciones con 90% de aciertos y expectancy −0.30 siguen dando 🔴 LOW
 por mucho que quien escribió el fichero pensara otra cosa.
 
-**6. Deja rastro en disco.**
+**6. Añade el calendario económico.** Sin él, `NEWS_CLEAR` se retiene y el
+contexto no puede pasar de 92/100 — el hueco de datos queda visible en vez de
+valer ocho puntos gratis.
+
+```csv
+time,currency,impact,title
+2026-01-15T13:30:00+00:00,USD,HIGH,CPI
+```
+
+```json
+"calendar": "calendar.csv"
+```
+
+Una publicación de alto impacto **no es un mercado, es una lotería**: los
+spreads se triplican, la liquidez desaparece y un stop es una sugerencia. Por
+eso es un veto, no un factor: no baja la nota, para el escaneo.
+
+**7. Deja rastro en disco.**
 
 ```bash
 make run CONFIG=session.json DATA=bars.csv FLAGS="--journal orders.jsonl"
@@ -479,6 +496,8 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad, gestión de posición (BE, trailing, parciales, time stop) | ✅ |
 | `session` | Configuración, runner tick→decisión→orden, diagnóstico por etapa | ✅ |
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
+| `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
+| `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
 | `backtesting` | Simulación walk-forward sin look-ahead, costes, reporte y calibración de tiers | ✅ |
@@ -523,6 +542,51 @@ contexto** (Market Context Engine).
 
 ---
 
+## Conectar un broker real
+
+Son **tres métodos**: `place`, `query`, `cancel`. Y `query` no es una
+optimización — es lo único que separa un envío con timeout de una posición
+duplicada.
+
+Equivocarse en cualquiera de los tres de forma sutil no aparece en pruebas:
+aparece la primera vez que la red hipa con dinero real dentro. Por eso el
+contrato no está escrito en prosa, está escrito como comprobaciones ejecutables:
+
+```bash
+elyon conformance --adapter mibroker:build
+```
+
+```
+✓ query on an unknown order: returns exists=False
+✓ place then query: the venue reports the order (broker id B-0001)
+✓ duplicate place is deduplicated: the same client order id maps to one broker order
+✓ errors are typed: could not provoke a rejection; verify by hand
+✓ cancel is reflected in query: a cancelled order no longer reports as live
+
+All critical checks passed. The OMS's guarantees hold against this adapter.
+```
+
+Las comprobaciones van a propósito a los casos incómodos, no al camino feliz.
+Un adapter que coloca órdenes bien y responde `query` mal pasa cualquier prueba
+casual y pierde dinero al primer timeout. Los fallos que detecta, con el motivo:
+
+| Adapter que… | Consecuencia |
+|---|---|
+| dice que existe una orden que nunca se colocó | el OMS adopta un fantasma y la orden real nunca se envía |
+| no encuentra una orden que acaba de aceptar | tras un timeout el OMS concluye que no se colocó nada y **manda una segunda** |
+| no deduplica el mismo `client_order_id` | un reenvío de recuperación dobla la posición |
+| lanza excepciones sin tipar | el OMS no distingue rechazo de timeout y no concilia |
+| tipa un rechazo como timeout | reintenta para siempre una orden que el venue nunca aceptará |
+| no responde a `query` | el OMS se planta — seguro, pero nunca se recupera |
+
+Y la suite **no revienta con un adapter roto**: informar del mal comportamiento
+*es* el trabajo. Un kit de conformidad que se cae con lo que debe detectar no
+sirve de nada.
+
+> **Estas comprobaciones colocan órdenes.** Contra una cuenta demo.
+
+---
+
 ## Qué falta para producción
 
 Honestidad sobre el estado real, porque lo que existe está probado y lo que no,
@@ -531,9 +595,8 @@ no:
 | Falta | Qué implica |
 |---|---|
 | **Adaptador de broker real** | El `BrokerAdapter` es un `Protocol` y hay un `PaperBroker` que sabe fallar como fallan los reales. Conectar MT5/IB/Binance es implementar tres métodos — `place`, `query`, `cancel` — pero necesita credenciales y un entorno que aquí no existe |
-| **Cancelar el resto de un fill parcial** | Una orden con posición abierta no se puede cancelar: `CANCELLED` es terminal y la posición sigue viva. Cancelar el remanente es otra operación y aún no está modelada |
 | **Feed de datos en vivo** | La sesión consume ticks; falta quien se los dé |
-| **Calendario económico** | Sin él `NEWS_CLEAR` se retiene y el techo de contexto es 92/100 |
+| **Calendario poblado** | El motor lo lee; hay que traer los eventos de un proveedor |
 | **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
 | **SMT Divergence** | Necesita feed de un instrumento correlacionado |
 | **Saga durable / gateway en Rust** | ADR-EXE-3 y ADR-EXE-7, fuera del alcance actual |
