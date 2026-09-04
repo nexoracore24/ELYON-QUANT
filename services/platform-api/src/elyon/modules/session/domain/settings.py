@@ -113,6 +113,10 @@ def _management(config: SessionConfig, **changes: Any) -> SessionConfig:
     return replace(config, management=replace(config.management, **changes))
 
 
+def _instrument(config: SessionConfig, **changes: Any) -> SessionConfig:
+    return replace(config, instrument=replace(config.instrument, **changes))
+
+
 def _as_strategies(value: Any) -> tuple[StrategyId, ...]:
     if isinstance(value, str):
         raise DeterminismError(
@@ -232,6 +236,41 @@ SETTINGS: tuple[Setting, ...] = (
         "Total risk allowed on the table at once.",
         read=lambda c: str(c.risk.max_open_risk),
         write=lambda c, v: _risk(c, max_open_risk=_as_decimal(v)),
+    ),
+
+    # -- what the broker will accept ---------------------------------------
+    # These convert a risk fraction into lots. Left at a standard FX lot they
+    # are simply wrong for gold, an index or a crypto pair -- and wrong here
+    # means every trade on that instrument is the wrong size, quietly, with
+    # nothing in the logs looking unusual.
+    Setting(
+        "lotStep", "Lot step", Scope.FLAT_ONLY, Kind.DECIMAL,
+        "The smallest increment the broker will accept. Sizes are rounded "
+        "down to it, never up.",
+        read=lambda c: str(c.instrument.lot_step),
+        write=lambda c, v: _instrument(c, lot_step=_as_decimal(v)),
+    ),
+    Setting(
+        "minLot", "Minimum lot", Scope.FLAT_ONLY, Kind.DECIMAL,
+        "Below this the broker refuses. A setup that sizes smaller is skipped "
+        "rather than rounded up into more risk than was budgeted.",
+        read=lambda c: str(c.instrument.min_lot),
+        write=lambda c, v: _instrument(c, min_lot=_as_decimal(v)),
+    ),
+    Setting(
+        "maxLot", "Maximum lot", Scope.FLAT_ONLY, Kind.DECIMAL,
+        "The broker's ceiling for one order.",
+        read=lambda c: str(c.instrument.max_lot),
+        write=lambda c, v: _instrument(c, max_lot=_as_decimal(v)),
+    ),
+    Setting(
+        "valuePerPriceUnit", "Value per price unit", Scope.FLAT_ONLY,
+        Kind.DECIMAL,
+        "Account currency per 1.0 of price, per lot. 100000 for a standard FX "
+        "lot; check your broker's contract size for anything else, because "
+        "this number is what turns a stop distance into a position size.",
+        read=lambda c: str(c.instrument.value_per_price_unit),
+        write=lambda c, v: _instrument(c, value_per_price_unit=_as_decimal(v)),
     ),
 
     # -- how it manages what it holds --------------------------------------

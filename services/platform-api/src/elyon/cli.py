@@ -375,8 +375,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     """Serve the control surface a phone connects to."""
     from elyon.modules.api.domain import (
         DEFAULT_IDLE_TIMEOUT, LoginService, OperatorStore, ServerConfig,
-        TokenRegistry, build_server, command_token, live_panel_for, panel_for,
-        phone_token,
+        TokenRegistry, build_server, change_recorder, command_token,
+        config_writer, live_panel_for, panel_for, phone_token,
     )
 
     config = SessionConfig.load(args.config)
@@ -438,9 +438,21 @@ def cmd_serve(args: argparse.Namespace) -> int:
     for warning in settings.warnings():
         print(f"⚠ {warning}\n", file=sys.stderr)
 
+    # A setting changed from a phone that vanishes on the next reboot is worse
+    # than one that was refused: the engine comes back looking right and sized
+    # against something else. Applied changes are written back to the same file
+    # the engine was started with -- two places to look for what an engine is
+    # configured to do is one too many, and the second is always stale.
+    wiring: dict = {}
+    if args.login and not args.no_save:
+        wiring["persist"] = config_writer(args.config)
+        wiring["record"] = change_recorder(
+            args.changelog or Path(args.config).with_suffix(".changes.jsonl")
+        )
+
     panel = (
         live_panel_for(
-            runner, allow_resume=args.allow_command, login=login,
+            runner, allow_resume=args.allow_command, login=login, **wiring,
         )
         if runner is not None
         else panel_for(
@@ -448,6 +460,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             allow_resume=args.allow_command,
             login=login,
             configurable=args.login,
+            **wiring,
         )
     )
     server = build_server(panel, tokens, settings)
@@ -590,6 +603,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument(
         "--operators", help=f"the account file (default {DEFAULT_OPERATORS_FILE})"
+    )
+    serve.add_argument(
+        "--changelog",
+        help="where configuration changes are appended (default: the config "
+             "file's name with .changes.jsonl)",
+    )
+    serve.add_argument(
+        "--no-save", action="store_true",
+        help="apply changes to the running engine but never write them back. "
+             "Every edit then lasts until the next restart.",
     )
     serve.set_defaults(func=cmd_serve)
 

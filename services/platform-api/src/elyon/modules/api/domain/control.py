@@ -24,8 +24,11 @@ journal says who changed what, and from what to what.
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from elyon.modules.session.domain import Mode, SessionConfig, TradingSession
@@ -207,6 +210,12 @@ class EngineControl:
     start_feed: Callable[[], None] | None = None
     stop_feed: Callable[[], None] | None = None
     journal: list[ConfigChange] = field(default_factory=list)
+    # Where an applied change is written so it survives a restart, and where a
+    # record of who changed what is appended. Both optional; both reported
+    # honestly when absent, because a setting that takes effect and then
+    # reverts on the next reboot is worse than one that was refused.
+    persist: Callable[[SessionConfig], None] | None = None
+    record: Callable[[ConfigChange], None] | None = None
 
     # -- reading ----------------------------------------------------------
 
@@ -274,17 +283,55 @@ class EngineControl:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         after: SessionConfig = self.read(lambda s: s.config)
         for key in changed:
-            self.journal.append(ConfigChange(
+            self._remember(ConfigChange(
                 at=stamp, who=who, key=key,
                 before=before.get(key), after=BY_KEY[key].read(after),
             ))
 
+        saved, note = self._save(after)
         return {
             "changed": list(changed),
             "configHash": after.config_hash,
             "warnings": list(after.warnings()),
-            "message": f"{len(changed)} setting(s) applied",
+            "saved": saved,
+            "message": f"{len(changed)} setting(s) applied" + note,
         }
+
+    def _save(self, config: SessionConfig) -> tuple[bool, str]:
+        """Write the configuration out, and be loud when that fails.
+
+        The change is already live at this point -- the session accepted it.
+        What is at stake is whether it is still there after a restart, and a
+        setting that silently reverts on the next reboot is the worst kind of
+        bug: the engine comes back looking right and sized against something
+        else. So a failed write is stated in the same breath as the success,
+        rather than logged where nobody is looking.
+        """
+        if self.persist is None:
+            return False, (
+                ". Not saved: this engine was started without a config file to "
+                "write back to, so the change lasts until it restarts."
+            )
+        try:
+            self.persist(config)
+        except Exception as exc:  # noqa: BLE001 -- any filesystem failure
+            return False, (
+                f". APPLIED BUT NOT SAVED ({exc}). It is live now and will be "
+                f"gone after a restart."
+            )
+        return True, " and saved"
+
+    def _remember(self, change: ConfigChange) -> None:
+        self.journal.append(change)
+        if self.record is None:
+            return
+        try:
+            self.record(change)
+        except Exception as exc:  # noqa: BLE001
+            # An unwritable audit log must not undo a change that already took
+            # effect -- that would leave the engine and its record disagreeing
+            # in the one direction that cannot be reconstructed afterwards.
+            print(f"could not record config change: {exc}")
 
     def _require_live_confirmation(
         self, changes: Mapping[str, Any], confirmation: str
@@ -334,7 +381,7 @@ class EngineControl:
         self.write(lambda s: s.oms.resume(note))
 
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self.journal.append(ConfigChange(
+        self._remember(ConfigChange(
             at=stamp, who=who, key="engine",
             before="halted", after="running",
         ))
@@ -357,7 +404,7 @@ class EngineControl:
         note = reason.strip() or f"stopped by {who}"
         self.write(lambda s: s.oms.halt(note))
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        self.journal.append(ConfigChange(
+        self._remember(ConfigChange(
             at=stamp, who=who, key="engine", before="running", after="halted",
         ))
         exposed = self.read(lambda s: s.position is not None)
@@ -372,15 +419,52 @@ class EngineControl:
         }
 
 
-def control_for(session: TradingSession) -> EngineControl:
+def config_writer(path: str | Path) -> Callable[[SessionConfig], None]:
+    """Persist an applied configuration back to the file it came from.
+
+    Deliberately the same file the engine was started with, rather than a
+    parallel "runtime settings" store. Two places to look for what an engine is
+    configured to do is one place too many, and the second one is always the
+    one that is out of date.
+    """
+    target = Path(path)
+
+    def write(config: SessionConfig) -> None:
+        config.save(target)
+
+    return write
+
+
+def change_recorder(path: str | Path) -> Callable[[ConfigChange], None]:
+    """Append configuration changes to a log, one JSON object per line.
+
+    Same format and the same append-only discipline as the order journal,
+    because the question people actually ask is ordered: *what was it set to
+    when that trade happened?* An audit trail in a different shape, in a
+    different place, is one nobody lines up against the orders.
+    """
+    target = Path(path)
+
+    def record(change: ConfigChange) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a") as handle:
+            handle.write(json.dumps(change.to_dict(), sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    return record
+
+
+def control_for(session: TradingSession, **wiring: Any) -> EngineControl:
     """Drive a session directly. For a single thread -- a test, a dry run."""
     return EngineControl(
         read=lambda view: view(session),
         write=lambda action: action(session),
+        **wiring,
     )
 
 
-def live_control_for(runner: Any) -> EngineControl:
+def live_control_for(runner: Any, **wiring: Any) -> EngineControl:
     """Drive a session that a feed thread is also writing to.
 
     Reads and writes both go through the runner's lock. Reading the session
@@ -393,4 +477,5 @@ def live_control_for(runner: Any) -> EngineControl:
         feed_state=lambda: runner.state.value,
         start_feed=lambda: None if runner.running else runner.start(),
         stop_feed=runner.stop,
+        **wiring,
     )

@@ -11,7 +11,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
 > ejecutable con log persistente, adaptador MT5/Exness y control desde el
-> móvil, con **975 tests** verdes.
+> móvil, con **998 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 975 tests
+make test                           # 998 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -513,7 +513,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio | ✅ |
 | `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, app móvil | ✅ |
 | `api/accounts` | Login: PBKDF2 de stdlib, roles→capacidades, throttling por IP y cuenta, sesiones que caducan y se revocan | ✅ |
-| `api/control` | Ajustes remotos con alcance (live / flat-only / restart), preflight, arranque registrado | ✅ |
+| `api/control` | Ajustes remotos con alcance (live / flat-only / restart), preflight, persistencia y bitácora de cambios | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
@@ -529,7 +529,7 @@ certifica nada · el riesgo tiene la última palabra · toda decisión se explic
 su propio registro · un feed caído para el motor sin cerrar posiciones · ningún
 lector ve una sesión a medio escribir · un ajuste no puede reescribir una
 posición ya puesta · una configuración se aplica entera o no se aplica · quien
-puede parar no puede arrancar.
+puede parar no puede arrancar · una configuración guardada se relee idéntica.
 
 ---
 
@@ -703,12 +703,44 @@ Hay un `force`, porque una comprobación puede equivocarse y un motor que no
 arranca es peor que uno que avisa. Queda **registrado** cuando se usa: «lo
 forzamos» es la primera pregunta después de un mal día.
 
+### Lo que cambias sobrevive al reinicio
+
+Un ajuste cambiado desde el móvil que desaparece en el siguiente arranque es
+**peor que uno rechazado**: el motor vuelve pareciendo correcto y dimensionado
+contra otra cosa. Los cambios aplicados se escriben de vuelta al mismo fichero
+con el que arrancaste — dos sitios donde mirar qué está configurado un motor es
+uno de más, y el segundo siempre es el que está desactualizado.
+
+Y si la escritura falla, **se dice en la misma frase**:
+
+```
+3 setting(s) applied and saved
+1 setting(s) applied. APPLIED BUT NOT SAVED (read-only file system).
+  It is live now and will be gone after a restart.
+```
+
+Con `--no-save` los cambios duran hasta el siguiente reinicio, si es lo que
+quieres.
+
 ### Cada cambio queda con un nombre encima
 
 Un cambio de configuración es tan consecuente como una orden: decide cómo será
-cada orden posterior. El registro dice quién cambió qué, y de qué a qué.
+cada orden posterior. Se apila en `session.changes.jsonl`, append-only, una
+línea por cambio, con el mismo formato que el log de órdenes — porque la
+pregunta que se hace de verdad está ordenada: *¿cómo estaba configurado cuando
+pasó esa operación?*
+
+```json
+{"at":"2026-09-04T23:37:22Z","who":"owner","key":"riskPerTrade",
+ "before":"0.005","after":"0.0125"}
+```
+
 «Debíamos estar corriendo con otros ajustes» no es una explicación que nadie
 pueda comprobar seis meses después.
+
+Un log que no se puede escribir **no deshace** el cambio: eso dejaría al motor y
+a su registro en desacuerdo en la única dirección que no se puede reconstruir
+después.
 
 ### Lo que no viaja al móvil
 

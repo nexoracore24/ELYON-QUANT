@@ -8,6 +8,7 @@ figure restating a position already sized, LIVE mode reached by a stray tap.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from decimal import Decimal
 
@@ -21,6 +22,8 @@ from elyon.modules.api.domain import (
     Role,
     Router,
     TokenRegistry,
+    change_recorder,
+    config_writer,
     control_for,
     panel_for,
     preflight,
@@ -350,6 +353,107 @@ class TestEngineControl:
     def test_an_empty_change_set_is_refused(self):
         with pytest.raises(DeterminismError, match="no changes"):
             control_for(a_session()).apply({}, who="marcus")
+
+
+# ---------------------------------------------------------------------------
+# Surviving a restart
+# ---------------------------------------------------------------------------
+
+class TestPersistence:
+    def test_an_applied_change_is_written_back(self, tmp_path):
+        # The whole point. A setting changed from a phone that vanishes on the
+        # next reboot is worse than one that was refused: the engine comes back
+        # looking right and sized against something else.
+        path = tmp_path / "session.json"
+        session = a_session()
+        session.config.save(path)
+        control = control_for(session, persist=config_writer(path))
+
+        result = control.apply({"riskPerTrade": "0.01"}, who="marcus")
+
+        assert result["saved"] is True
+        assert SessionConfig.load(path).risk.risk_per_trade == dec("0.01")
+
+    def test_the_file_is_only_written_after_the_session_accepted_it(self, tmp_path):
+        path = tmp_path / "session.json"
+        session = a_session()
+        session.config.save(path)
+        control = control_for(session, persist=config_writer(path))
+
+        with pytest.raises(DeterminismError):
+            control.apply({"symbol": "GBPUSD"}, who="marcus")
+
+        assert SessionConfig.load(path).symbol == "EURUSD"
+
+    def test_a_failed_write_is_stated_not_swallowed(self, tmp_path):
+        # The change is already live at this point. What is at stake is whether
+        # it is still there tomorrow, and that has to be said out loud.
+        def explode(config):
+            raise OSError("read-only file system")
+
+        control = control_for(a_session(), persist=explode)
+        result = control.apply({"riskPerTrade": "0.01"}, who="marcus")
+
+        assert result["saved"] is False
+        assert "APPLIED BUT NOT SAVED" in result["message"]
+        assert "read-only file system" in result["message"]
+        # And it really did take effect -- the failure is about durability.
+        assert control.read(lambda s: s.config.risk.risk_per_trade) == dec("0.01")
+
+    def test_without_a_writer_the_answer_says_so(self):
+        result = control_for(a_session()).apply(
+            {"riskPerTrade": "0.01"}, who="marcus"
+        )
+        assert result["saved"] is False
+        assert "lasts until it restarts" in result["message"]
+
+    def test_a_saved_change_survives_a_new_session(self, tmp_path):
+        path = tmp_path / "session.json"
+        session = a_session()
+        session.config.save(path)
+        control_for(session, persist=config_writer(path)).apply(
+            {"riskPerTrade": "0.0125", "minRewardRisk": "3"}, who="marcus"
+        )
+
+        restarted = TradingSession(SessionConfig.load(path))
+        assert restarted.config.risk.risk_per_trade == dec("0.0125")
+        assert restarted.config.risk.min_reward_risk == dec("3")
+
+
+class TestTheChangeLog:
+    def test_every_change_is_appended(self, tmp_path):
+        log = tmp_path / "changes.jsonl"
+        control = control_for(a_session(), record=change_recorder(log))
+        control.apply({"riskPerTrade": "0.01"}, who="marcus")
+        control.stop(who="marcus")
+
+        entries = [json.loads(line) for line in log.read_text().splitlines()]
+        assert [e["key"] for e in entries] == ["riskPerTrade", "engine"]
+        assert entries[0]["who"] == "marcus"
+        assert (entries[0]["before"], entries[0]["after"]) == ("0.005", "0.01")
+
+    def test_it_is_append_only(self, tmp_path):
+        log = tmp_path / "changes.jsonl"
+        control_for(a_session(), record=change_recorder(log)).apply(
+            {"riskPerTrade": "0.01"}, who="a"
+        )
+        control_for(a_session(), record=change_recorder(log)).apply(
+            {"riskPerTrade": "0.02"}, who="b"
+        )
+        assert len(log.read_text().splitlines()) == 2
+
+    def test_an_unwritable_log_does_not_undo_the_change(self, tmp_path, capsys):
+        # The change already took effect. Rolling it back because the audit
+        # trail failed would leave the engine and its record disagreeing in the
+        # one direction that cannot be reconstructed afterwards.
+        def explode(change):
+            raise OSError("disk full")
+
+        control = control_for(a_session(), record=explode)
+        control.apply({"riskPerTrade": "0.01"}, who="marcus")
+
+        assert control.read(lambda s: s.config.risk.risk_per_trade) == dec("0.01")
+        assert "could not record config change" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

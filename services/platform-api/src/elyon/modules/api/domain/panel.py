@@ -61,7 +61,8 @@ def session_snapshot(session: Any) -> Mapping[str, Any]:
 
 
 def live_panel_for(
-    runner: Any, *, allow_resume: bool = False, login: Any = None
+    runner: Any, *, allow_resume: bool = False, login: Any = None,
+    **wiring: Any,
 ) -> ControlPanel:
     """Wire a *running* session to the control surface.
 
@@ -90,7 +91,7 @@ def live_panel_for(
         halt=halt,
         resume=resume if allow_resume else None,
         page=render_page,
-        control=live_control_for(runner),
+        control=live_control_for(runner, **wiring),
         login=login,
     )
 
@@ -101,6 +102,7 @@ def panel_for(
     allow_resume: bool = False,
     login: Any = None,
     configurable: bool = False,
+    **wiring: Any,
 ) -> ControlPanel:
     """Wire a session to the control surface.
 
@@ -131,6 +133,6 @@ def panel_for(
         halt=halt,
         resume=resume if allow_resume else None,
         page=render_page,
-        control=control_for(session) if configurable else None,
+        control=control_for(session, **wiring) if configurable else None,
         login=login,
     )

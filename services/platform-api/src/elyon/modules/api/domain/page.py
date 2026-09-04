@@ -514,7 +514,11 @@ $('apply').onclick = async () => {
     changes: pending, confirm: $('confirm').value,
   });
   $('apply-note').textContent = res.data.error || res.data.message || '';
-  $('apply-note').className = 'note ' + (res.ok ? 'good' : 'err');
+  // Applied-but-not-saved is not a success. The change is live, and it will be
+  // gone after a restart -- which is the failure people notice weeks later,
+  // when the engine is quietly running settings nobody chose.
+  $('apply-note').className = 'note ' +
+    (!res.ok ? 'err' : res.data.saved === false ? 'warn' : 'good');
   if (res.ok) {
     pending = {}; $('confirm').value = '';
     await loadConfig();

@@ -187,6 +187,34 @@ Lo que la app hace con eso:
   es, y no existe un instante en que la fracción de riesgo entró y la lista de
   estrategias no.
 - Cada cambio queda **con un nombre encima**: quién, qué, de qué valor a cuál.
+- Y se **escribe de vuelta al fichero** con el que arrancaste, para que sobreviva
+  a un reinicio.
+
+### Lo que cambias sobrevive al reinicio
+
+Un ajuste cambiado desde el móvil que desaparece en el siguiente arranque es
+**peor que uno rechazado**: el motor vuelve pareciendo correcto y dimensionado
+contra otra cosa.
+
+Si la escritura falla, se dice en la misma frase que el éxito, y la app lo pinta
+en ámbar, no en verde:
+
+```
+1 setting(s) applied. APPLIED BUT NOT SAVED (read-only file system).
+It is live now and will be gone after a restart.
+```
+
+Los cambios se apilan además en `session.changes.jsonl` — append-only, una línea
+por cambio, mismo formato que el log de órdenes, porque la pregunta que se hace
+de verdad está ordenada: *¿cómo estaba configurado cuando pasó esa operación?*
+
+```json
+{"at":"2026-09-04T23:37:22Z","who":"owner","key":"riskPerTrade",
+ "before":"0.005","after":"0.0125"}
+```
+
+Con `--no-save` nada se escribe y cada edición dura hasta el siguiente reinicio.
+Con `--changelog otra/ruta.jsonl` la bitácora va donde quieras.
 
 ### Pasar a LIVE se escribe
 

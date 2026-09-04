@@ -13,6 +13,7 @@ has to hold:
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -206,6 +207,17 @@ class SessionConfig:
     # -- provenance -------------------------------------------------------
 
     def to_canonical_dict(self) -> dict[str, Any]:
+        """The shape that gets hashed. **Deliberately lossy.**
+
+        This is the fingerprint of a decision, not a configuration file. It is
+        flat, it omits anything that cannot change what a trade would be, and
+        it renders calibrations as one string apiece because the hash only
+        needs them to be *comparable*, not reconstructable.
+
+        It is not the inverse of :meth:`from_dict` and must never be used as
+        one -- :meth:`to_dict` is. The two used to be confused, which produced
+        a ``save()`` that wrote a file ``load()`` refused.
+        """
         return {
             "symbol": self.symbol,
             "mode": self.mode.value,
@@ -241,6 +253,71 @@ class SessionConfig:
 
     # -- serialisation ----------------------------------------------------
 
+    def to_dict(self) -> dict[str, Any]:
+        """The exact inverse of :meth:`from_dict`.
+
+        Every field, in the shape the loader expects, so that a configuration
+        written out and read back is the same configuration. A saved file that
+        quietly loses a setting is worse than one that fails to load: the
+        engine comes back up looking right and sized against something else.
+
+        There is a test that walks every field to keep this honest, because a
+        serialiser that drifts from its parser drifts silently.
+        """
+        return {
+            "symbol": self.symbol,
+            "mode": self.mode.value,
+            "timeframe": self.timeframe,
+            "strategies": [s.value for s in self.strategies],
+            "shadowStrategies": [s.value for s in self.shadow_strategies],
+            "conflictPolicy": self.conflict_policy.value,
+            "calibrations": [
+                {
+                    "strategy": strategy.value,
+                    "sampleSize": calibration.sample_size,
+                    "wins": calibration.wins,
+                    "expectancyR": str(calibration.expectancy_r),
+                    "maxDrawdownR": str(calibration.max_drawdown_r),
+                    "dataset": calibration.dataset,
+                }
+                for strategy, calibration in sorted(
+                    self.calibrations.items(), key=lambda kv: kv[0].value
+                )
+            ],
+            "risk": {
+                "equity": str(self.risk.equity),
+                "riskPerTrade": str(self.risk.risk_per_trade),
+                "dailyLossLimit": str(self.risk.daily_loss_limit),
+                "maxOpenRisk": str(self.risk.max_open_risk),
+                "minRewardRisk": str(self.risk.min_reward_risk),
+                "maxConcurrentPositions": self.risk.max_concurrent_positions,
+            },
+            "management": {
+                "breakEvenAtR": _optional_str(self.management.break_even_at_r),
+                "breakEvenBufferR": str(self.management.break_even_buffer_r),
+                "trailFromR": _optional_str(self.management.trail_from_r),
+                "trailDistanceAtr": str(self.management.trail_distance_atr),
+                "partialAtR": _optional_str(self.management.partial_at_r),
+                "partialFraction": str(self.management.partial_fraction),
+                "timeStopBars": self.management.time_stop_bars,
+                "timeStopMinR": str(self.management.time_stop_min_r),
+            },
+            "instrument": {
+                "lotStep": str(self.instrument.lot_step),
+                "minLot": str(self.instrument.min_lot),
+                "maxLot": str(self.instrument.max_lot),
+                "valuePerPriceUnit": str(self.instrument.value_per_price_unit),
+            },
+            "atrPeriod": self.atr_period,
+            "swingGrade": self.swing_grade,
+            "warmupBars": self.warmup_bars,
+            "lookbackBars": self.lookback_bars,
+            "entryScoreThreshold": self.entry_score_threshold,
+            "allowUncalibratedLive": self.allow_uncalibrated_live,
+            "skipContextGate": self.skip_context_gate,
+            "calendar": self.calendar_path,
+        }
+
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SessionConfig":
         """Build from plain data, failing loudly on anything unrecognised.
@@ -254,6 +331,7 @@ class SessionConfig:
             "conflictPolicy", "risk", "atrPeriod", "swingGrade", "warmupBars",
             "lookbackBars", "entryScoreThreshold", "allowUncalibratedLive",
             "skipContextGate", "management", "calibrations", "calendar",
+            "instrument",
         }
         unknown = set(raw) - known
         if unknown:
@@ -280,6 +358,9 @@ class SessionConfig:
         management_raw = raw.get("management", {})
         management = ManagementPolicy(
             break_even_at_r=_optional_dec(management_raw.get("breakEvenAtR", "1.0")),
+            break_even_buffer_r=dec(
+                str(management_raw.get("breakEvenBufferR", "0.1"))
+            ),
             trail_from_r=_optional_dec(management_raw.get("trailFromR", "1.5")),
             trail_distance_atr=dec(
                 str(management_raw.get("trailDistanceAtr", "1.5"))
@@ -289,6 +370,20 @@ class SessionConfig:
                 str(management_raw.get("partialFraction", "0.5"))
             ),
             time_stop_bars=management_raw.get("timeStopBars", 40),
+            time_stop_min_r=dec(str(management_raw.get("timeStopMinR", "0.3"))),
+        )
+
+        # The contract sizes every position. Left at a standard FX lot it is
+        # simply wrong for gold, an index or a crypto pair -- and wrong here
+        # means every trade on that instrument is the wrong size, silently.
+        instrument_raw = raw.get("instrument", {})
+        instrument = InstrumentSpec(
+            lot_step=dec(str(instrument_raw.get("lotStep", "0.01"))),
+            min_lot=dec(str(instrument_raw.get("minLot", "0.01"))),
+            max_lot=dec(str(instrument_raw.get("maxLot", "100"))),
+            value_per_price_unit=dec(
+                str(instrument_raw.get("valuePerPriceUnit", "100000"))
+            ),
         )
 
         return cls(
@@ -301,6 +396,7 @@ class SessionConfig:
             conflict_policy=ConflictPolicy(raw.get("conflictPolicy", "VETO")),
             risk=risk,
             management=management,
+            instrument=instrument,
             atr_period=int(raw.get("atrPeriod", 14)),
             swing_grade=int(raw.get("swingGrade", 1)),
             warmup_bars=int(raw.get("warmupBars", 40)),
@@ -316,7 +412,18 @@ class SessionConfig:
         return cls.from_dict(json.loads(Path(path).read_text()))
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(json.dumps(self.to_canonical_dict(), indent=2))
+        """Write a file this class can read back.
+
+        Written to a temporary file beside the target and renamed, because the
+        alternative is a half-written configuration where a working one used to
+        be -- and the moment a config is saved from a phone, an interrupted
+        write is a live possibility rather than a thought experiment.
+        """
+        target = Path(path)
+        payload = json.dumps(self.to_dict(), indent=2)
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        temporary.write_text(payload)
+        os.replace(temporary, target)
 
 
 def _calibrations(entries: Any) -> dict[StrategyId, Calibration]:
@@ -350,6 +457,10 @@ def _calibrations(entries: Any) -> dict[StrategyId, Calibration]:
             dataset=str(entry.get("dataset", "")),
         )
     return resolved
+
+
+def _optional_str(value: Any) -> str | None:
+    return None if value is None else str(value)
 
 
 def _optional_dec(value: Any) -> Decimal | None:

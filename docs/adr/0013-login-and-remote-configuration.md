@@ -7,7 +7,7 @@
   [ADR-0011](0011-oms-duplicate-prevention.md) ·
   [ADR-0012](0012-live-market-data-feed.md)
 - **Implementa:** `modules/api/domain/{accounts,control}.py`,
-  `modules/session/domain/settings.py`
+  `modules/session/domain/{settings,config}.py`
 
 ## Contexto
 
@@ -142,7 +142,38 @@ Hay un `force`, porque una comprobación puede equivocarse y un motor que no se
 puede arrancar es peor que uno que avisa. Se **registra** cuando se usa: «lo
 forzamos» es la primera pregunta después de un mal día.
 
-### 10. Cada cambio queda con un nombre encima
+### 10. Un cambio aplicado se escribe de vuelta
+
+Un ajuste cambiado desde el móvil que desaparece en el siguiente arranque es
+**peor que uno rechazado**: el motor vuelve pareciendo correcto y dimensionado
+contra otra cosa. Se persiste **al mismo fichero** con el que arrancó el motor,
+no a un almacén paralelo de «ajustes de runtime»: dos sitios donde mirar qué
+está configurado un motor es uno de más, y el segundo siempre es el que está
+desactualizado.
+
+Se escribe **después** de que la sesión aceptó el cambio, nunca antes, y de forma
+atómica (temporal + rename) — desde el momento en que un config se guarda desde
+un móvil, una escritura interrumpida deja de ser un experimento mental.
+
+Y si falla, **se dice en la misma frase que el éxito**. El cambio ya está vivo;
+lo que está en juego es si sigue ahí mañana, y eso no se registra en un log donde
+nadie mira: va en la respuesta, y la app lo pinta en ámbar en vez de verde.
+
+Esto exigió arreglar un bug de base: `SessionConfig.save()` escribía la forma
+**canónica** —el fingerprint que se hashea, deliberadamente con pérdida— y no la
+forma del fichero. El resultado era un `save()` que producía un fichero que
+`load()` rechazaba por claves desconocidas. Ahora `to_dict()` es el inverso exacto
+de `from_dict()`, `to_canonical_dict()` está documentado como lo que es, y hay un
+test que recorre **campo por campo** — porque un serializador que se separa de su
+parser se separa en silencio.
+
+De paso apareció otra pérdida: el `InstrumentSpec` no se leía del fichero **en
+absoluto**. Cada sesión usaba un lote FX estándar, que es sencillamente incorrecto
+para oro, un índice o un par de cripto — y ahí «incorrecto» significa que cada
+operación en ese instrumento va mal dimensionada, en silencio, sin que nada en los
+logs parezca raro. Ahora se carga, se guarda y se puede ajustar (`FLAT_ONLY`).
+
+### 11. Cada cambio queda con un nombre encima
 
 Un cambio de configuración es tan consecuente como una orden: decide cómo será
 cada orden posterior. El registro dice **quién** cambió **qué**, y de qué valor a
@@ -164,6 +195,11 @@ nadie pueda comprobar seis meses después.
   enumerador de cuentas.
 - **Aplicar los ajustes de uno en uno según se tocan.** Deja configuraciones a
   medias en el cable y hace imposible validar el conjunto.
+- **Un almacén aparte para los «ajustes de runtime».** Dos sitios donde mirar qué
+  está configurado un motor, y el segundo siempre desactualizado.
+- **Reutilizar `to_canonical_dict()` para guardar.** Es lo que ya estaba roto: el
+  fingerprint de una decisión y un fichero de configuración se parecen y no son lo
+  mismo, y confundirlos produce un `save()` que `load()` rechaza.
 - **Permitir cambiar el símbolo en caliente reiniciando la sesión por dentro.**
   Parecería que el ajuste «funciona» mientras tira silenciosamente todo el
   histórico y las posiciones. Un `RESTART` explícito es más honesto.
@@ -187,6 +223,10 @@ El fichero de operadores es un JSON, no una base de datos: sin auditoría de
 accesos, sin rotación, sin 2FA. Y **sigue sin haber TLS aquí** (ADR previo): un
 login sobre HTTP plano expuesto a internet entrega la contraseña, así que el
 servidor sigue escuchando en `127.0.0.1` y gritando si lo mueves de ahí.
+
+Un log de cambios que no se puede escribir **no deshace** el cambio: eso dejaría
+al motor y a su registro en desacuerdo en la única dirección que no se puede
+reconstruir después.
 
 **Deuda registrada.** Sin 2FA. Sin recuperación de contraseña (a propósito: un
 flujo de recuperación es una segunda puerta, y en un sistema de un solo dueño la
