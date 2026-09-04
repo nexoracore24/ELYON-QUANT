@@ -4,4 +4,27 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Anything that could carry a broker credential. Listed generously and
+# deliberately: a secret committed to git is not deleted by deleting it, it
+# lives in the history, and a trading credential in a repository is an account
+# somebody else can trade.
 .env
+.env.*
+*.secret
+*.key
+*.pem
+*.p12
+credentials*
+secrets*
+**/credentials/
+**/secrets/
+
+# Working output. Order journals record real order ids and prices, and live
+# session configs carry account settings; neither belongs in version control.
+*.jsonl
+orders*.jsonl
+journal*.jsonl
+session.json
+session.*.json
+*.local.json
