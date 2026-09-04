@@ -11,7 +11,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
 > ejecutable con log persistente, adaptador MT5/Exness y control desde el
-> móvil, con **998 tests** verdes.
+> móvil, con **1018 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 998 tests
+make test                           # 1018 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -135,6 +135,7 @@ hecho — y `recover()` le pregunta al broker qué pasó mientras estaba muerto.
 **8. Ábrelo desde el móvil.**
 
 ```bash
+elyon doctor                              # ¿puede esta máquina?
 elyon useradd owner --role OWNER          # una vez, en la máquina
 elyon serve --config session.json --data bars.csv --login
 ```
@@ -512,6 +513,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
 | `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio | ✅ |
 | `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, app móvil | ✅ |
+| `host` | Comprobación del anfitrión: serverless, Windows, tzdata, disco escribible y duradero | ✅ |
 | `api/accounts` | Login: PBKDF2 de stdlib, roles→capacidades, throttling por IP y cuenta, sesiones que caducan y se revocan | ✅ |
 | `api/control` | Ajustes remotos con alcance (live / flat-only / restart), preflight, persistencia y bitácora de cambios | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
@@ -559,6 +561,37 @@ El motor SMC incluye **Fibonacci Institucional** (anclado a estructura, nunca
 indicador independiente; provee la OTE) y es **explicable por diseño**: nunca
 responde *"entró porque sí"*. El pipeline se abre siempre con el **gate de
 contexto** (Market Context Engine).
+
+---
+
+## Dónde corre esto
+
+**No corre en Vercel, Netlify ni en ninguna función serverless.** No es que
+falte configurarlo: el motor es un proceso vivo que acumula velas, mantiene una
+posición abierta y sondea el feed cada 250 ms entre peticiones que nadie está
+haciendo. Nada de eso sobrevive a una invocación — y escalar horizontalmente,
+que es lo que esas plataformas hacen bien, significa dos motores sobre la misma
+cuenta, que es **exactamente la posición duplicada** que el OMS entero existe
+para impedir. Además `MetaTrader5` es solo Windows.
+
+```bash
+elyon doctor      # ¿puede esta máquina correr el motor?
+```
+
+```
+✕ runtime        running inside Vercel, which is serverless. The engine is a
+                 long-lived stateful process… Use a VPS.
+! os             Linux: MetaTrader5 is Windows-only…
+! durability     /tmp is temporary storage… an order journal there is gone
+                 exactly when you need it — after a crash.
+```
+
+El reparto que sí funciona: **VPS Windows 24/7 para el motor**, tu portátil para
+investigar (backtest, calibración y paper funcionan en cualquier sitio), y
+Vercel para la landing y las docs si quieres. La app de control **la sirve el
+propio motor**, a propósito: sin CDN, sin build, sin nada que se caiga aparte.
+
+📄 **[Guía: dónde corre cada cosa](docs/07-operations/deployment.md)**
 
 ---
 

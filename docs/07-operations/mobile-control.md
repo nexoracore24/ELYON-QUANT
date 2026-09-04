@@ -62,7 +62,17 @@ control que siempre devuelve 403 enseña a la gente a ignorar errores.
 
 ## 3. Arrancar el servidor
 
-Primero, la cuenta. Una vez, **en la máquina**:
+Primero, comprueba que la máquina puede:
+
+```bash
+elyon doctor
+```
+
+Si estás en algo serverless (Vercel, Lambda, Cloud Run…) te lo dice y para ahí:
+el motor es un proceso vivo y esas plataformas no los tienen. Ver
+[dónde corre cada cosa](deployment.md).
+
+Después, la cuenta. Una vez, **en la máquina**:
 
 ```bash
 elyon useradd owner --role OWNER

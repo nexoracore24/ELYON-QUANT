@@ -1,4 +1,4 @@
-.PHONY: help test install demo strategies dna run calibrate app useradd users
+.PHONY: help test install demo strategies dna run calibrate app useradd users doctor
 
 API := services/platform-api
 
@@ -8,6 +8,8 @@ help:
 	@echo "  make install     Install dev dependencies"
 	@echo "  make test        Run the test suite"
 	@echo "  make demo        Run the end-to-end pipeline demo"
+	@echo ""
+	@echo "  make doctor      Can this machine run the engine?"
 	@echo ""
 	@echo "  make strategies  List the strategy catalog and its tiers"
 	@echo "  make dna         List the Market DNA profiles"
@@ -63,3 +65,8 @@ useradd:
 users:
 	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli users \
 		--operators $(abspath $(or $(OPERATORS),operators.json))
+
+# Can this machine run the engine? Exits non-zero if something blocks, so it
+# works in a startup script.
+doctor:
+	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli doctor

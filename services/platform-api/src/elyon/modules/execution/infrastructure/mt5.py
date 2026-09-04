@@ -418,6 +418,22 @@ def _import_mt5():
     try:
         import MetaTrader5  # type: ignore
     except ImportError as exc:
+        import platform
+
+        system = platform.system()
+        if system != "Windows":
+            # Naming the platform matters here. "Install the package" sends
+            # someone on Linux round a loop that has no exit: the package
+            # drives a running Windows terminal through a Windows API, and
+            # there is no build for anything else.
+            raise DeterminismError(
+                f"MetaTrader5 is Windows-only and this host is {system}. "
+                f"There is no Linux or macOS build -- the package drives a "
+                f"running MT5 terminal through a Windows API. Backtesting, "
+                f"calibration and paper trading work here; a live session "
+                f"needs a Windows machine with the terminal open. Run "
+                f"`elyon doctor` for the full picture."
+            ) from exc
         raise DeterminismError(
             "the MetaTrader5 package is not installed. It is Windows-only and "
             "needs the MT5 terminal running and logged in, with algorithmic "

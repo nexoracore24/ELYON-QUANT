@@ -10,6 +10,7 @@ system that stops starting one day.
     elyon run --config c.json --data bars.csv
     elyon calibrate --data bars.csv --strategy SIX_PILLARS
     elyon conformance --adapter mybroker:build
+    elyon doctor                  can this machine run the engine?
     elyon useradd owner --role OWNER
     elyon serve --config c.json --data bars.csv --login
 """
@@ -497,6 +498,22 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Say whether this machine can run the engine, and what it can do."""
+    from elyon.host import inspect, verdict
+
+    report = inspect(args.path)
+    print("ELYON QUANT — host check\n")
+    print(report)
+    print()
+    print(verdict(report))
+    if report.advisories and not report.blockers:
+        print()
+        print("  Advisories above are things to know, not reasons to stop.")
+    print()
+    return EXIT_ERROR if report.blockers else EXIT_OK
+
+
 def cmd_conformance(args: argparse.Namespace) -> int:
     """Check a broker adapter against the OMS's safety contract."""
     if args.adapter:
@@ -639,6 +656,14 @@ def build_parser() -> argparse.ArgumentParser:
                      "configures and starts",
             )
         parser_.set_defaults(func=handler)
+
+    doctor = subs.add_parser(
+        "doctor", help="check whether this machine can run the engine"
+    )
+    doctor.add_argument(
+        "--path", help="the directory the engine will write to (default: here)"
+    )
+    doctor.set_defaults(func=cmd_doctor)
 
     users = subs.add_parser("users", help="list the accounts that can sign in")
     users.add_argument("--operators")
