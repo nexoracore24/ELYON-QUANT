@@ -10,8 +10,8 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > corre: datos de mercado, detectores Smart Money, la estrategia de los seis
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
-> ejecutable con log persistente y adaptador MT5/Exness, con **799 tests**
-> verdes.
+> ejecutable con log persistente, adaptador MT5/Exness y control desde el
+> móvil, con **839 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 799 tests
+make test                           # 839 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -499,6 +499,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
 | `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment` | ✅ |
+| `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, página móvil | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
 | `market_context` | Context Score 0–100, gate con histéresis, regímenes, **Market DNA** de 7 activos | ✅ |
@@ -541,6 +542,54 @@ El motor SMC incluye **Fibonacci Institucional** (anclado a estructura, nunca
 indicador independiente; provee la OTE) y es **explicable por diseño**: nunca
 responde *"entró porque sí"*. El pipeline se abre siempre con el **gate de
 contexto** (Market Context Engine).
+
+---
+
+## Control desde el móvil
+
+**El bot no corre en el móvil.** `MetaTrader5` es solo Windows y necesita el
+terminal abierto. La arquitectura real es motor en un VPS Windows 24/7, y el
+móvil como **mando a distancia**.
+
+```bash
+elyon serve --config session.json --data bars.csv
+```
+
+### Parar es seguro. Arrancar no.
+
+Exponer el motor al móvil es exponerlo a **quien tenga el token**. Un móvil
+robado debería poder **parar** el bot — molesto, nada más. No debería poder
+reanudarlo, subir el riesgo ni cambiar a LIVE. Por eso las capacidades se
+gradúan por **hacia dónde mueven el riesgo**:
+
+| Capacidad | Qué permite | ¿La tiene el móvil? |
+|---|---|---|
+| `OBSERVE` | Mirar | ✅ |
+| `PROTECT` | Parar, aplanar — solo **reduce** exposición | ✅ |
+| `COMMAND` | Reanudar, reconfigurar — solo **aumenta** | ❌ |
+
+`COMMAND` no es un flag: es una función distinta (`command_token()`), para que
+concederlo sea algo escrito y no algo por defecto. Y el hook de reanudar **ni se
+cablea** salvo que arranques con `--allow-command`.
+
+**No hay botón de arrancar en la página.** Pintar un control que solo devolvería
+403 enseña a ignorar errores. El de parar pide dos toques —un bolsillo está
+lleno de toques accidentales— y el armado caduca a los 4 segundos.
+
+### Lo que no viaja al móvil
+
+El snapshot **no tiene campo** para credenciales, número de cuenta, servidor ni
+rutas. No se ocultan: no existen, y hay un test que lo comprueba. Una captura de
+esa pantalla en un chat **no es un incidente**.
+
+### Cómo llegar
+
+Escucha en `127.0.0.1` por defecto — no accesible desde fuera, a propósito.
+Ponlo detrás de **Tailscale** o un túnel SSH. `--host 0.0.0.0` te avisa a
+gritos, y **no hay TLS aquí a propósito**: un TLS a medias parece terminado y es
+peor que ninguno.
+
+📄 **[Guía completa: control desde el móvil](docs/07-operations/mobile-control.md)**
 
 ---
 
@@ -630,7 +679,7 @@ no:
 |---|---|
 | **Verificar el adaptador MT5 contra un terminal real** | Escrito y probado contra un terminal falso; los retcodes están transcritos de memoria y hay que verificarlos. `elyon conformance` en cuenta demo es el paso que falta |
 | **Otros brokers** | IB, Binance: tres métodos cada uno. El kit de conformidad ya existe |
-| **Feed de datos en vivo** | La sesión consume ticks; falta quien se los dé |
+| **Feed de datos en vivo** | La sesión consume ticks (`session.on_tick`) y el servidor móvil ya sirve; falta quien traiga los ticks desde MT5. Es la última pieza |
 | **Calendario poblado** | El motor lo lee; hay que traer los eventos de un proveedor |
 | **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
 | **SMT Divergence** | Necesita feed de un instrumento correlacionado |

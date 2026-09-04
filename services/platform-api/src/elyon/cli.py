@@ -10,6 +10,7 @@ system that stops starting one day.
     elyon run --config c.json --data bars.csv
     elyon calibrate --data bars.csv --strategy SIX_PILLARS
     elyon conformance --adapter mybroker:build
+    elyon serve --config c.json --data bars.csv
 """
 
 from __future__ import annotations
@@ -293,6 +294,59 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the control surface a phone connects to."""
+    from elyon.modules.api.domain import (
+        ServerConfig, TokenRegistry, build_server, command_token, panel_for,
+        phone_token,
+    )
+
+    config = SessionConfig.load(args.config)
+    series = read_bars(Path(args.data), config.symbol, Timeframe(config.timeframe))
+    dna = profile_for(config.symbol)
+    if args.learn_dna:
+        dna = learn_dna(series, dna, atr_period=config.atr_period)
+
+    store = JsonlEventStore(Path(args.journal)) if args.journal else None
+    session = TradingSession(config, dna=dna, store=store)
+    for candle in series:
+        session._on_candle(candle)
+
+    tokens = TokenRegistry()
+    phone = phone_token("phone")
+    tokens.add(phone)
+    if args.allow_command:
+        tokens.add(command_token("console"))
+
+    settings = ServerConfig(host=args.host, port=args.port)
+    for warning in settings.warnings():
+        print(f"⚠ {warning}\n", file=sys.stderr)
+
+    server = build_server(
+        panel_for(session, allow_resume=args.allow_command), tokens, settings
+    )
+
+    print(f"ELYON QUANT control surface\n")
+    print(f"  http://{args.host}:{args.port}/\n")
+    print("  Paste this token into the page. It is printed once:\n")
+    print(f"    {phone.secret}\n")
+    print("  The phone can watch and can stop. It cannot resume, cannot")
+    print("  change risk, and cannot enable a strategy -- those stay here.")
+    if not settings.is_exposed:
+        print("\n  Bound to localhost. To reach it from a phone, put both")
+        print("  devices on a VPN (Tailscale, WireGuard) or forward the port")
+        print("  over SSH. Do not put this on the open internet.")
+    print("\n  Ctrl-C to stop serving.\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped serving; the session is unchanged")
+    finally:
+        server.server_close()
+    return EXIT_OK
+
+
 def cmd_conformance(args: argparse.Namespace) -> int:
     """Check a broker adapter against the OMS's safety contract."""
     if args.adapter:
@@ -370,6 +424,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="IN_SAMPLE runs are measured but never certified",
     )
     calibrate.set_defaults(func=cmd_calibrate)
+
+    serve = subs.add_parser(
+        "serve", help="serve the control surface for a phone or browser"
+    )
+    serve.add_argument("--config", required=True)
+    serve.add_argument("--data", required=True)
+    serve.add_argument("--journal")
+    serve.add_argument("--learn-dna", action="store_true")
+    serve.add_argument(
+        "--host", default="127.0.0.1",
+        help="binding anywhere else exposes a control endpoint over plain HTTP",
+    )
+    serve.add_argument("--port", type=int, default=8787)
+    serve.add_argument(
+        "--allow-command", action="store_true",
+        help="also issue a token that can resume trading. Not for a phone.",
+    )
+    serve.set_defaults(func=cmd_serve)
 
     conformance = subs.add_parser(
         "conformance",
