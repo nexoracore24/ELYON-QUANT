@@ -60,6 +60,36 @@ def session_snapshot(session: Any) -> Mapping[str, Any]:
     return snapshot
 
 
+def live_panel_for(runner: Any, *, allow_resume: bool = False) -> ControlPanel:
+    """Wire a *running* session to the control surface.
+
+    Every read goes through the runner's lock. Reading the session directly
+    while a feed thread is appending to it would hand a phone a snapshot of a
+    state that never existed -- a candle half-added, a position half-written.
+    """
+    from .page import render_page
+
+    def status() -> Mapping[str, Any]:
+        snapshot = dict(runner.read(session_snapshot))
+        snapshot.update(runner.health())
+        return snapshot
+
+    def halt(reason: str) -> str:
+        runner.read(lambda s: s.oms.halt(reason))
+        return f"halted: {reason}. Open positions are protected, not closed."
+
+    def resume(reason: str) -> str:
+        runner.read(lambda s: s.oms.resume(reason))
+        return f"resumed: {reason}"
+
+    return ControlPanel(
+        status=status,
+        halt=halt,
+        resume=resume if allow_resume else None,
+        page=render_page,
+    )
+
+
 def panel_for(session: Any, *, allow_resume: bool = False) -> ControlPanel:
     """Wire a session to the control surface.
 

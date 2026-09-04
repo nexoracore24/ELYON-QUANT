@@ -151,13 +151,40 @@ hacia tu propio motor.
 
 ---
 
-## 7. Límite actual
+## 7. En vivo
 
-`elyon serve` corre la sesión **sobre un fichero de barras** y luego sirve el
-resultado. Para operar en vivo falta el feed de datos en tiempo real: el bucle
-de la sesión ya consume ticks (`session.on_tick`), pero todavía no hay nada que
-se los dé desde MT5.
+```bash
+elyon serve --config session.json --data bars.csv --live
+```
 
-Es decir: hoy el móvil sirve para **observar y parar** una sesión sobre datos
-históricos, y toda la seguridad ya está construida y probada. Cuando exista el
-feed en vivo, el mismo servidor sirve sin tocar nada.
+Sin `--live`, la sesión corre sobre el fichero de barras y luego sirve el
+resultado — útil para revisar lo que pasó. Con `--live`, las barras son el
+**calentamiento** y el motor sigue consumiendo ticks del terminal MT5.
+
+La página pone la salud del feed **arriba del todo**, antes que ningún número:
+
+```
+Feed STALLED · 94s silent
+no tick for 94s. The market may be closed, or the connection may be gone
+```
+
+Un feed parado con una posición abierta es el peor estado del que no enterarse,
+y un precio viejo no se ve viejo. Por eso se dice, no se deja inferir.
+
+Si el feed se cae del todo, el motor **para solo** (`DISCONNECTED` + halt) y
+**no cierra nada**: no abrir riesgo nuevo a ciegas es prudente, cerrar a ciegas
+durante un corte es operar en el peor momento posible. En la página lo verás
+como `Halted` con el motivo `market data feed lost: …`.
+
+Reanudar sigue necesitando `COMMAND`, que el móvil no tiene. Es deliberado:
+volver a operar después de un corte es una decisión de escritorio.
+
+📄 Detalle de las decisiones: [ADR-0012](../adr/0012-live-market-data-feed.md).
+
+---
+
+## 8. Límite actual
+
+Un símbolo por proceso. Varios instrumentos a la vez —lo que SMT Divergence
+necesita— piden un feed multi-símbolo que todavía no existe. Y un reinicio
+recalienta desde el fichero de barras, no desde donde se quedó el stream.

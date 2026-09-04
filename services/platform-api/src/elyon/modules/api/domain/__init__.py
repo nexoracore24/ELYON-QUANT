@@ -20,7 +20,7 @@ from .auth import (
     phone_token,
 )
 from .page import render_page
-from .panel import panel_for, session_snapshot
+from .panel import live_panel_for, panel_for, session_snapshot
 from .server import (
     LOCALHOST,
     ControlPanel,
@@ -35,6 +35,7 @@ __all__ = [
     "AccessToken", "Capability", "ControlPanel", "Forbidden", "LOCALHOST",
     "MIN_TOKEN_LENGTH", "PHONE_CAPABILITIES", "READ_ONLY", "Response",
     "Router", "ServerConfig", "TokenRegistry", "Unauthorised", "build_server",
-    "command_token", "new_secret", "panel_for", "phone_token", "render_page",
+    "command_token", "live_panel_for", "new_secret", "panel_for",
+    "phone_token", "render_page",
     "session_snapshot", "to_jsonable",
 ]

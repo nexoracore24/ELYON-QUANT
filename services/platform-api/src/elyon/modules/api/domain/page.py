@@ -101,6 +101,7 @@ PAGE = """<!doctype html>
       <span class="big" id="headline">…</span>
     </div>
     <div class="sub" id="subline"></div>
+    <div class="sub" id="feed"></div>
   </div>
 
   <div class="card" id="position-card">
@@ -163,6 +164,19 @@ function render(s) {
     halted ? 'Halted' : exposed ? 'In a position' : 'Watching';
   $('subline').textContent =
     halted ? (s.haltReason || 'stopped') : (s.symbol + ' · ' + s.mode);
+
+  // A stalled feed with a position open is the worst state to be unaware of,
+  // so it is stated rather than left to be inferred from a stale number.
+  if (s.feed) {
+    const bad = s.feed !== 'LIVE';
+    $('feed').innerHTML = bad
+      ? `<span class="warn">Feed ${esc(s.feed)}` +
+        (s.secondsSinceTick != null ? ` · ${s.secondsSinceTick}s silent` : '') +
+        `</span>` + (s.feedDetail ? `<br>${esc(s.feedDetail)}` : '')
+      : `Feed live · ${s.ticks} ticks`;
+  } else {
+    $('feed').textContent = '';
+  }
 
   if (exposed) {
     $('position-card').classList.remove('hidden');

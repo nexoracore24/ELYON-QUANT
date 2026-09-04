@@ -11,7 +11,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
 > ejecutable con log persistente, adaptador MT5/Exness y control desde el
-> móvil, con **839 tests** verdes.
+> móvil, con **869 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 839 tests
+make test                           # 869 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -496,9 +496,10 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `risk` | Presupuesto con reserva atómica (CAS), position sizing, riesgo dinámico | ✅ |
 | `trading` | Scoring Engine, DecisionRecord, explicabilidad, gestión de posición (BE, trailing, parciales, time stop) | ✅ |
 | `session` | Configuración, runner tick→decisión→orden, diagnóstico por etapa | ✅ |
+| `session/live` | Runner en vivo con hilo propio, estados de feed con nombre, halt al desconectar, lecturas bajo lock | ✅ |
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
-| `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment` | ✅ |
+| `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio | ✅ |
 | `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, página móvil | ✅ |
 | `market_context/calendar` | Calendario económico, ventanas de blackout asimétricas, mapa divisa↔instrumento | ✅ |
 | `execution` | OMS event-sourced: máquina de estados, idempotencia, query-before-resend, circuit breakers, outbox, DLQ, recovery | ✅ |
@@ -512,7 +513,8 @@ cualquier score · el stop nunca cae del lado equivocado · una estrategia sin
 calibrar nunca opera sola · añadir una estrategia nunca mejora un setup
 existente · truncar el futuro no cambia el pasado · un backtest in-sample no
 certifica nada · el riesgo tiene la última palabra · toda decisión se explica desde
-su propio registro.
+su propio registro · un feed caído para el motor sin cerrar posiciones · ningún
+lector ve una sesión a medio escribir.
 
 ---
 
@@ -552,7 +554,8 @@ terminal abierto. La arquitectura real es motor en un VPS Windows 24/7, y el
 móvil como **mando a distancia**.
 
 ```bash
-elyon serve --config session.json --data bars.csv
+elyon serve --config session.json --data bars.csv          # solo mirar
+elyon serve --config session.json --data bars.csv --live   # + feed en vivo
 ```
 
 ### Parar es seguro. Arrancar no.
@@ -670,6 +673,68 @@ credenciales, orden de puesta en marcha, y qué esperar de cada comprobación.
 
 ---
 
+## Feed en vivo: de tick a decisión
+
+Con `--live` el motor deja de acabarse al final del fichero de velas y sigue
+consumiendo ticks del terminal:
+
+```bash
+elyon serve --config session.json --data bars.csv --live
+```
+
+Las velas del fichero son el **calentamiento** —estructura, swings, ATR— y a
+partir de ahí el feed continúa la misma serie. No hay dos caminos de código: en
+vivo entra por `session.on_tick`, exactamente igual que en backtest.
+
+**MT5 no empuja datos.** No hay callback ni socket: preguntas
+`symbol_info_tick` y te contesta, haya cambiado algo o no. De ahí sale todo lo
+incómodo:
+
+- **El mismo tick vuelve una y otra vez.** Se deduplica por contenido
+  (`time_msc`, bid, ask) antes de que nada aguas abajo lo vea. Plegarlo dos
+  veces inflaría el volumen y el conteo de ticks de la vela.
+- **Los ticks entre dos sondeos se pierden.** A 250 ms te vas a perder ticks en
+  un mercado rápido. Es aceptable **porque se decide sobre velas confirmadas**:
+  un tick perdido puede mover ligeramente un máximo, pero no puede cambiar qué
+  vela cerró ni cuándo.
+- **«Sin ticks» y «sin conexión» se ven igual.** Un fin de semana y un socket
+  muerto devuelven lo mismo. El feed no lo infiere del silencio: **pregunta**, y
+  distingue terminal caído / símbolo desconocido (con el aviso del sufijo de
+  Exness) / símbolo fuera de Market Watch / mercado cerrado.
+
+### Un feed que se cae no es una excepción, es un martes
+
+Los estados tienen nombre: `STARTING · LIVE · STALLED · DISCONNECTED · STOPPED`.
+
+Al desconectarse, el runner **para el OMS** (`halt_on_disconnect=True` por
+defecto) y **no cierra nada**. Un motor que no puede ver precios no debería
+abrir riesgo nuevo — pero cerrar a ciegas durante un corte es operar en el peor
+momento posible. Y sigue reportando: *un runner callado es indistinguible de uno
+muerto, y a las 3am la diferencia importa.*
+
+La página del móvil pone la salud del feed arriba del todo, antes que ningún
+número. **Un feed parado con una posición abierta es el peor estado del que no
+enterarse**, y un precio viejo no se ve viejo.
+
+### Dos hilos tocan la sesión
+
+El feed la muta; el servidor la lee para contestar al móvil. Eso es una carrera,
+y el síntoma sería un snapshot que describe un estado que nunca existió: una
+posición a medio escribir, una lista de velas a medio ampliar. **Toda** mutación
+y **toda** lectura pasan por un `RLock` — el panel en vivo lee por
+`runner.read(...)`, nunca la sesión directamente. Los callbacks corren **fuera**
+del lock: un notificador lento que lo retuviera pararía el feed, y un feed que
+deja de leer es un feed que se pierde la vela que estaba esperando.
+
+Hay un test con cuatro hilos lectores comprobando la coherencia interna de cada
+snapshot mientras el feed escribe. *Un lock que nadie disputa es un lock que
+nadie ha probado.*
+
+`ReplayFeed` recorre el mismo runner, el mismo lock y el mismo manejo de
+desconexión sin broker delante — con `fail_after` para inyectar el corte.
+
+---
+
 ## Qué falta para producción
 
 Honestidad sobre el estado real, porque lo que existe está probado y lo que no,
@@ -679,15 +744,15 @@ no:
 |---|---|
 | **Verificar el adaptador MT5 contra un terminal real** | Escrito y probado contra un terminal falso; los retcodes están transcritos de memoria y hay que verificarlos. `elyon conformance` en cuenta demo es el paso que falta |
 | **Otros brokers** | IB, Binance: tres métodos cada uno. El kit de conformidad ya existe |
-| **Feed de datos en vivo** | La sesión consume ticks (`session.on_tick`) y el servidor móvil ya sirve; falta quien traiga los ticks desde MT5. Es la última pieza |
 | **Calendario poblado** | El motor lo lee; hay que traer los eventos de un proveedor |
 | **Posiciones concurrentes** | Una a la vez. Varias necesitan modelo de cartera y presupuesto de riesgo compartido |
 | **SMT Divergence** | Necesita feed de un instrumento correlacionado |
 | **Saga durable / gateway en Rust** | ADR-EXE-3 y ADR-EXE-7, fuera del alcance actual |
 
 Lo que **sí** puedes hacer hoy: correr sesiones completas sobre datos
-históricos, calibrar estrategias, comparar configuraciones, y ver exactamente
-por qué el motor decidió lo que decidió en cada vela.
+históricos, calibrar estrategias, comparar configuraciones, seguir una sesión en
+vivo desde el móvil, y ver exactamente por qué el motor decidió lo que decidió
+en cada vela.
 
 ---
 

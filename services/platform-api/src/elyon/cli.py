@@ -297,8 +297,8 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 def cmd_serve(args: argparse.Namespace) -> int:
     """Serve the control surface a phone connects to."""
     from elyon.modules.api.domain import (
-        ServerConfig, TokenRegistry, build_server, command_token, panel_for,
-        phone_token,
+        ServerConfig, TokenRegistry, build_server, command_token,
+        live_panel_for, panel_for, phone_token,
     )
 
     config = SessionConfig.load(args.config)
@@ -312,6 +312,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     for candle in series:
         session._on_candle(candle)
 
+    runner = None
+    if args.live:
+        from elyon.modules.execution.infrastructure.mt5_feed import Mt5TickFeed
+        from elyon.modules.session.domain import LiveRunner
+
+        feed = Mt5TickFeed(config.symbol)
+        feed.ensure_symbol()
+        runner = LiveRunner(session, feed)
+        runner.start()
+        print(f"live feed started on {feed.venue_symbol}\n")
+
     tokens = TokenRegistry()
     phone = phone_token("phone")
     tokens.add(phone)
@@ -322,9 +333,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
     for warning in settings.warnings():
         print(f"⚠ {warning}\n", file=sys.stderr)
 
-    server = build_server(
-        panel_for(session, allow_resume=args.allow_command), tokens, settings
+    panel = (
+        live_panel_for(runner, allow_resume=args.allow_command)
+        if runner is not None
+        else panel_for(session, allow_resume=args.allow_command)
     )
+    server = build_server(panel, tokens, settings)
 
     print(f"ELYON QUANT control surface\n")
     print(f"  http://{args.host}:{args.port}/\n")
@@ -341,8 +355,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopped serving; the session is unchanged")
+        print("\nstopping")
     finally:
+        if runner is not None:
+            runner.stop()
         server.server_close()
     return EXIT_OK
 
@@ -437,6 +453,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="binding anywhere else exposes a control endpoint over plain HTTP",
     )
     serve.add_argument("--port", type=int, default=8787)
+    serve.add_argument(
+        "--live", action="store_true",
+        help="drive the session from the MT5 tick feed instead of stopping at "
+             "the end of the bar file (requires the terminal)",
+    )
     serve.add_argument(
         "--allow-command", action="store_true",
         help="also issue a token that can resume trading. Not for a phone.",
