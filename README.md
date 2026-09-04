@@ -11,7 +11,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 > pilares, el catálogo ICT combinable, el gate de contexto con Market DNA,
 > backtesting, riesgo, scoring, gestión de posición, el OMS y una sesión
 > ejecutable con log persistente, adaptador MT5/Exness y control desde el
-> móvil, con **1018 tests** verdes.
+> móvil, con **1037 tests** verdes.
 >
 > ```bash
 > make test          # suite completa
@@ -29,7 +29,7 @@ de ingeniería de nivel Stripe / Palantir / Google / OpenAI.
 
 ```bash
 make install                        # pytest, nada más
-make test                           # 1018 tests
+make test                           # 1037 tests
 make demo                           # el pipeline entero, explicándose
 ```
 
@@ -50,7 +50,21 @@ Sale con `mode: PAPER`, la estrategia de la casa en vivo y el resto en shadow.
 `LIVE` hay que escribirlo a mano: un sistema donde el modo peligroso es el que
 te toca por no elegir acaba operando dinero real por accidente.
 
-**3. Consigue barras.** CSV con cabecera `time,open,high,low,close[,volume]`.
+**3. Consigue barras.** Si ya tienes MT5 corriendo, del propio terminal:
+
+```bash
+elyon bars --symbol EURUSD --timeframe M5 --count 1500 --out bars.csv
+```
+
+**La vela que se está formando no se exporta**: un fichero que la llevara le
+daría al motor un máximo y un mínimo que cambian después. Y los precios pasan
+por los dígitos que el símbolo declara en el terminal, no por el repr de un
+float — ahí está la diferencia entre `1.10005` y `1.1000499999999999`.
+
+Ojo con `--server-offset`: los timestamps de MT5 son del **reloj del servidor
+del broker**, no UTC. Equivocarse no falla, **mueve todas las killzones**.
+
+O tráelas de donde quieras: CSV con cabecera `time,open,high,low,close[,volume]`.
 El tiempo admite epoch en segundos, milisegundos o nanosegundos, o ISO. Los
 precios se leen como **string** y se convierten con `dec` — nunca por float,
 porque `1.10005` pasado por un float vuelve como `1.1000499999999999` y dos
@@ -511,7 +525,7 @@ descartan** — descartarlas sesgaría la muestra hacia las que se resolvieron.
 | `session/live` | Runner en vivo con hilo propio, estados de feed con nombre, halt al desconectar, lecturas bajo lock | ✅ |
 | `execution/store` | Log append-only en JSONL, `fsync`, tolerante a escritura rota, restauración | ✅ |
 | `execution/conformance` | Suite ejecutable del contrato de adapter, tolerante a adapters rotos | ✅ |
-| `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio | ✅ |
+| `execution/infrastructure` | Adaptador MT5/Exness: mapeo de retcodes, búsqueda en 4 sitios, tag `magic`+`comment`; feed de ticks con dedup y diagnóstico del silencio; export de histórico sin la vela en formación | ✅ |
 | `api` | Servidor de control (solo stdlib), capacidades graduadas por riesgo, app móvil | ✅ |
 | `host` | Comprobación del anfitrión: serverless, Windows, tzdata, disco escribible y duradero | ✅ |
 | `api/accounts` | Login: PBKDF2 de stdlib, roles→capacidades, throttling por IP y cuenta, sesiones que caducan y se revocan | ✅ |
@@ -591,7 +605,9 @@ investigar (backtest, calibración y paper funcionan en cualquier sitio), y
 Vercel para la landing y las docs si quieres. La app de control **la sirve el
 propio motor**, a propósito: sin CDN, sin build, sin nada que se caiga aparte.
 
-📄 **[Guía: dónde corre cada cosa](docs/07-operations/deployment.md)**
+📄 **[Usarlo en el móvil, paso a paso](docs/07-operations/usarlo-en-el-movil.md)** —
+qué contratar, qué instalar y qué escribir, en orden ·
+📄 **[Dónde corre cada cosa](docs/07-operations/deployment.md)**
 
 ---
 

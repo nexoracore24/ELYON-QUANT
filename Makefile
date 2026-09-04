@@ -1,4 +1,4 @@
-.PHONY: help test install demo strategies dna run calibrate app useradd users doctor
+.PHONY: help test install demo strategies dna run calibrate app useradd users doctor bars
 
 API := services/platform-api
 
@@ -15,6 +15,7 @@ help:
 	@echo "  make dna         List the Market DNA profiles"
 	@echo ""
 	@echo "  Running a session:"
+	@echo "    make bars SYMBOL=EURUSD OUT=bars.csv   (needs MT5)"
 	@echo "    make config > session.json"
 	@echo "    make run CONFIG=session.json DATA=bars.csv"
 	@echo "    make calibrate DATA=bars.csv STRATEGY=SIX_PILLARS"
@@ -70,3 +71,11 @@ users:
 # works in a startup script.
 doctor:
 	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli doctor
+
+# Closed candles out of the MT5 terminal, in the shape `run` reads. The bar
+# still forming is never exported.
+bars:
+	@cd $(API) && PYTHONPATH=src python3 -m elyon.cli bars \
+		--symbol $(or $(SYMBOL),EURUSD) --out $(abspath $(or $(OUT),bars.csv)) \
+		--timeframe $(or $(TIMEFRAME),M5) --count $(or $(COUNT),1500) \
+		--suffix "$(SUFFIX)" --server-offset $(or $(OFFSET),0)

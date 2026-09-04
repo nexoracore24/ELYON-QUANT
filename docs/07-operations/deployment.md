@@ -119,7 +119,9 @@ Nunca `--host 0.0.0.0` a pelo — **no hay TLS en este servidor a propósito**, 
 con login eso importa más, no menos: un formulario de contraseña sobre HTTP
 plano expuesto a internet entrega la contraseña.
 
-📄 [Guía completa: control desde el móvil](mobile-control.md) ·
+📄 [**Usarlo en el móvil, paso a paso**](usarlo-en-el-movil.md) — la versión sin
+arquitectura: qué contratar, qué instalar, qué escribir ·
+📄 [Control desde el móvil, en detalle](mobile-control.md) ·
 📄 [Conectar Exness](connecting-exness.md)
 
 ---

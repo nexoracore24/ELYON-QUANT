@@ -11,6 +11,7 @@ system that stops starting one day.
     elyon calibrate --data bars.csv --strategy SIX_PILLARS
     elyon conformance --adapter mybroker:build
     elyon doctor                  can this machine run the engine?
+    elyon bars --symbol EURUSD --out bars.csv     history from the terminal
     elyon useradd owner --role OWNER
     elyon serve --config c.json --data bars.csv --login
 """
@@ -498,6 +499,37 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_bars(args: argparse.Namespace) -> int:
+    """Export closed candles from the MT5 terminal into a CSV."""
+    from elyon.modules.execution.infrastructure.mt5 import Mt5Config
+    from elyon.modules.execution.infrastructure.mt5_history import Mt5History
+
+    history = Mt5History(
+        args.symbol,
+        Mt5Config(symbol_suffix=args.suffix),
+        server_offset_hours=args.server_offset,
+    )
+    timeframe = Timeframe(args.timeframe)
+    series = history.candles(timeframe, args.count)
+    history.to_csv(args.out, timeframe, args.count)
+
+    print(f"\n{args.out}: {history.describe_window(series)}\n")
+    print(f"  Symbol at the venue: {history.venue_symbol}")
+    print(f"  Server clock assumed: UTC{args.server_offset:+d}")
+    if args.server_offset == 0:
+        print()
+        print("  If your broker's server runs at UTC+2 or UTC+3, pass")
+        print("  --server-offset 2 (or 3). Getting this wrong does not fail --")
+        print("  it moves every killzone by that many hours, and the engine")
+        print("  looks like it is working. Check the timestamps above against")
+        print("  a session you know: London opens 07:00 UTC in winter.")
+    print()
+    print("  The bar still forming was not exported. A file that carries it")
+    print("  would hand the engine a high and a low that change later.")
+    print()
+    return EXIT_OK
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Say whether this machine can run the engine, and what it can do."""
     from elyon.host import inspect, verdict
@@ -656,6 +688,27 @@ def build_parser() -> argparse.ArgumentParser:
                      "configures and starts",
             )
         parser_.set_defaults(func=handler)
+
+    bars = subs.add_parser(
+        "bars", help="export closed candles from the MT5 terminal to a CSV"
+    )
+    bars.add_argument("--symbol", required=True)
+    bars.add_argument("--out", required=True)
+    bars.add_argument(
+        "--timeframe", default="M5", choices=[t.value for t in Timeframe]
+    )
+    bars.add_argument("--count", type=int, default=1500)
+    bars.add_argument(
+        "--suffix", default="",
+        help="Exness Standard and Cent accounts append one (EURUSDm); Pro and "
+             "Raw do not",
+    )
+    bars.add_argument(
+        "--server-offset", type=int, default=0,
+        help="hours the broker's server clock runs ahead of UTC. Wrong values "
+             "do not fail; they move every killzone.",
+    )
+    bars.set_defaults(func=cmd_bars)
 
     doctor = subs.add_parser(
         "doctor", help="check whether this machine can run the engine"
